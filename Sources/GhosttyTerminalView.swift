@@ -9676,6 +9676,10 @@ final class GhosttySurfaceScrollView: NSView {
     private var blueprintOverlayView: TerminalBlueprintOverlayView?
     private let deferredBlueprintOverlayMutationScheduler = MainActorDeferredActionScheduler()
     private var blueprintOverlayMutationGeneration: UInt64 = 0
+    /// The voice agent's "Semantic mode" pill and hovering prompt box (see
+    /// `VoiceSemanticModeOverlay.swift`). Portal-hosted like the find bar so
+    /// they stay above the terminal; mounted below the find bar in z-order.
+    private var voiceSemanticOverlay: VoiceSemanticOverlayController?
     private let deferredSearchOverlayMutationScheduler = MainActorDeferredActionScheduler()
     private let imageTransferIndicatorShowScheduler = MainActorDeferredActionScheduler()
     private var activeImageTransferOperation: TerminalImageTransferOperation?
@@ -10129,6 +10133,10 @@ final class GhosttySurfaceScrollView: NSView {
         linkHoverIndicatorView.autoresizingMask = [.width, .height]
         addSubview(linkHoverIndicatorView)
 
+        voiceSemanticOverlay = VoiceSemanticOverlayController(container: self) { [weak self] in
+            self?.surfaceView.terminalSurface?.foregroundProcessID()
+        }
+
         scrollView.contentView.postsBoundsChangedNotifications = true
         observers.append(NotificationCenter.default.addObserver(
             forName: NSView.boundsDidChangeNotification,
@@ -10468,6 +10476,7 @@ final class GhosttySurfaceScrollView: NSView {
                 overlay.layoutOverlay()
             }
         }
+        voiceSemanticOverlay?.layout(containerBounds: bounds, cellHeight: surfaceView.cellSize.height)
         bringPaneDropTargetToFrontIfNeeded()
         // NSScrollView can defer clip-view/content-size updates until its own layout pass,
         // which makes interactive width changes arrive a queue turn late on Sequoia.
@@ -10754,6 +10763,7 @@ final class GhosttySurfaceScrollView: NSView {
     func attachSurface(_ terminalSurface: TerminalSurface) {
         if surfaceView.terminalSurface !== terminalSurface { setLinkHoverURL(nil) }
         surfaceView.attachSurface(terminalSurface)
+        voiceSemanticOverlay?.attach(surfaceID: terminalSurface.id)
         // Preserve the bootstrap 800x600 surface until portal reattach churn
         // has produced a real host size instead of a transient 1x1 placeholder.
         guard bounds.width > 1, bounds.height > 1 else { return }

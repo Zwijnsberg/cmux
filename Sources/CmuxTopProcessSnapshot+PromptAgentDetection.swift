@@ -27,6 +27,25 @@ extension CmuxTopProcessSnapshot {
         return definition
     }
 
+    /// The coding agent (Claude Code, Codex, …) that `foregroundPID` is, by
+    /// the same kernel-reported identity as `promptAgentDefinition`, but for
+    /// any agent definition (not only prompt-line-detected ones). Used by the
+    /// semantic-mode overlay to know when Claude Code or Codex owns a terminal.
+    nonisolated static func codingAgentDefinition(
+        foregroundPID: Int
+    ) -> CmuxTaskManagerCodingAgentDefinition? {
+        guard let details = processArgumentsAndEnvironment(for: foregroundPID),
+              let executablePath = executablePath(for: foregroundPID) else {
+            return nil
+        }
+        return CmuxTaskManagerCodingAgentDefinition.matchingDefinition(
+            processName: (executablePath as NSString).lastPathComponent,
+            processPath: executablePath,
+            arguments: details.arguments,
+            environment: details.environment
+        )
+    }
+
     private nonisolated static func executablePath(for pid: Int) -> String? {
         var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
         let length = proc_pidpath(pid_t(pid), &buffer, UInt32(buffer.count))
