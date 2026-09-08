@@ -208,7 +208,8 @@ struct VoiceSemanticModeTests {
 
     @Test func pillMovesLeftOfTheBlueprintBubbleWhenThatBetaIsOn() {
         #expect(VoiceSemanticModeStyle.buttonTrailingInset(blueprintEnabled: false) == 8)
-        #expect(VoiceSemanticModeStyle.buttonTrailingInset(blueprintEnabled: true) == 8 + 28 + 8)
+        // 8pt inset + 28pt bubble + 8pt gap; a literal because `#expect` infers mixed arithmetic as Int.
+        #expect(VoiceSemanticModeStyle.buttonTrailingInset(blueprintEnabled: true) == 44)
     }
 
     @Test func promptBottomInsetClearsTheAgentStatusRow() {
