@@ -121,7 +121,6 @@ extension TerminalController: ControlBlueprintContext {
             workspaceID: target.workspace.id,
             surfaceID: target.panel.id,
             isOpen: state.isOpen,
-            isCollapsed: state.layout.isCollapsed,
             revision: state.revision,
             elementCount: state.elementCount,
             updatedBy: state.updatedBy.rawValue,

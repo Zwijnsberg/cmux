@@ -58,12 +58,11 @@ struct ControlCommandCoordinatorBlueprintTests {
         ControlRequest(id: .int(1), method: method, params: params)
     }
 
-    private func snapshot(isOpen: Bool = true, isCollapsed: Bool = false) -> ControlBlueprintStateSnapshot {
+    private func snapshot(isOpen: Bool = true) -> ControlBlueprintStateSnapshot {
         ControlBlueprintStateSnapshot(
             workspaceID: workspaceID,
             surfaceID: surfaceID,
             isOpen: isOpen,
-            isCollapsed: isCollapsed,
             revision: 7,
             elementCount: 3,
             updatedBy: "user",
@@ -87,7 +86,6 @@ struct ControlCommandCoordinatorBlueprintTests {
             "surface_id": .string(surfaceID.uuidString),
             "surface_ref": .string("surface:1"),
             "visible": .bool(true),
-            "collapsed": .bool(false),
             "revision": .int(7),
             "element_count": .int(3),
             "updated_by": .string("user"),

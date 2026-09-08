@@ -120,7 +120,7 @@ struct TerminalBlueprintStateTests {
         )
     }
 
-    @Test("toggle opens a closed drawer and closes an open one")
+    @Test("toggle opens a closed popup and closes an open one")
     func toggle() {
         let state = makeState()
         #expect(state.isOpen == false)
@@ -135,44 +135,52 @@ struct TerminalBlueprintStateTests {
     func inapplicableIntents() {
         let state = makeState()
         #expect(state.perform(.collapse) == false)
-        #expect(state.perform(.expand) == false)
         #expect(state.perform(.close) == false)
         #expect(state.perform(.restore) == false)
+        #expect(state.perform(.enlarge) == false)
         #expect(state.perform(.zoomToFit) == false)
         state.open()
         #expect(state.perform(.expand) == false)
         #expect(state.perform(.restore) == false)
         #expect(state.perform(.collapse))
+        #expect(state.isOpen == false)
         #expect(state.perform(.collapse) == false)
-    }
-
-    @Test("collapse and expand remember the dragged split fraction")
-    func collapseExpandRemembersFraction() {
-        let state = makeState()
-        state.open()
-        state.setSplitFraction(0.6)
-        #expect(state.layout == .split(fraction: 0.6))
-        #expect(state.perform(.collapse))
-        #expect(state.layout == .collapsed)
-        #expect(state.isExpanded == false)
-        #expect(state.isOpen)
         #expect(state.perform(.expand))
-        #expect(state.layout == .split(fraction: 0.6))
+        #expect(state.isOpen)
     }
 
-    @Test("enlarge and restore round-trip through the remembered split")
+    @Test("a dragged popup size is remembered for this terminal across close and reopen")
+    func popupSizeRemembered() {
+        let state = makeState()
+        let pane = CGSize(width: 1000, height: 800)
+        state.open()
+        #expect(state.layout == .fitted)
+        state.setPopupSize(CGSize(width: 476, height: 366), paneSize: pane)
+        #expect(state.layout == .floating(widthFraction: 0.5, heightFraction: 0.5))
+        #expect(state.perform(.close))
+        #expect(state.perform(.open))
+        #expect(state.layout == .floating(widthFraction: 0.5, heightFraction: 0.5))
+        state.resetPopupSize()
+        #expect(state.layout == .fitted)
+        // A degenerate pane cannot produce a size.
+        state.setPopupSize(CGSize(width: 100, height: 100), paneSize: .zero)
+        #expect(state.layout == .fitted)
+    }
+
+    @Test("enlarge fills the pane and restore returns to the remembered size")
     func enlargeRestore() {
         let state = makeState()
+        let pane = CGSize(width: 1000, height: 800)
         state.open()
-        state.setSplitFraction(0.3)
+        state.setPopupSize(CGSize(width: 476, height: 366), paneSize: pane)
         #expect(state.perform(.enlarge))
         #expect(state.layout == .enlarged)
         #expect(state.perform(.enlarge) == false)
         #expect(state.perform(.restore))
-        #expect(state.layout == .split(fraction: 0.3))
+        #expect(state.layout == .floating(widthFraction: 0.5, heightFraction: 0.5))
         state.perform(.enlarge)
-        state.setSplitFraction(0.5)
-        #expect(state.layout == .split(fraction: 0.5))
+        state.setPopupSize(CGSize(width: 952, height: 732), paneSize: pane)
+        #expect(state.layout == .floating(widthFraction: 1, heightFraction: 1))
     }
 
     @Test("user edits bump the revision once per digest and persist the scene")
@@ -368,19 +376,19 @@ struct TerminalBlueprintStateTests {
         let state = makeState()
         #expect(state.sessionSnapshot() == nil)
         state.open()
-        state.setSplitFraction(0.7)
+        state.setPopupSize(CGSize(width: 476, height: 366), paneSize: CGSize(width: 1000, height: 800))
         state.handleBridgeMessage(.sceneChanged(sceneJSON: "{}", elementCount: 0, digest: "a"))
         let snapshot = state.sessionSnapshot()
-        #expect(snapshot == SessionTerminalBlueprintSnapshot(isOpen: true, layout: .split(fraction: 0.7), revision: 1))
+        #expect(snapshot == SessionTerminalBlueprintSnapshot(isOpen: true, layout: .floating(widthFraction: 0.5, heightFraction: 0.5), revision: 1))
 
         let restored = makeState()
         restored.restore(from: snapshot)
         #expect(restored.isOpen)
-        #expect(restored.layout == .split(fraction: 0.7))
+        #expect(restored.layout == .floating(widthFraction: 0.5, heightFraction: 0.5))
         #expect(restored.revision == 1)
-        restored.perform(.collapse)
-        restored.perform(.expand)
-        #expect(restored.layout == .split(fraction: 0.7))
+        restored.perform(.enlarge)
+        restored.perform(.restore)
+        #expect(restored.layout == .floating(widthFraction: 0.5, heightFraction: 0.5))
 
         let untouched = makeState()
         untouched.restore(from: nil)
@@ -444,8 +452,7 @@ struct TerminalBlueprintStateTests {
         #expect(changes.map(\.updatedBy) == [.user, .agent])
         #expect(changes.last?.elementCount == 1)
         #expect(changes.allSatisfy { $0.surfaceID == surfaceID })
-        #expect(visibility.map(\.isOpen) == [true, true])
-        #expect(visibility.map(\.isCollapsed) == [false, true])
+        #expect(visibility.map(\.isOpen) == [true, false])
     }
 
     @Test("render mermaid asks for the canvas, waits for ready, then renders and persists")
@@ -567,7 +574,7 @@ struct TerminalBlueprintStateTests {
             saveDebounce: .milliseconds(1),
             defaults: defaults
         )
-        state.restore(from: SessionTerminalBlueprintSnapshot(isOpen: true, layout: .split(fraction: 0.4), revision: 4))
+        state.restore(from: SessionTerminalBlueprintSnapshot(isOpen: true, layout: .fitted, revision: 4))
         await state.waitForPendingWork()
         #expect(state.sceneJSON == nil)
 

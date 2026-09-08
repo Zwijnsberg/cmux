@@ -23,7 +23,6 @@ struct TerminalPanelView: View {
     @AppStorage(TerminalBlueprintFeature.enabledKey)
     private var blueprintEnabled = false
     /// Height of the whole pane body; the blueprint drawer sizes itself as a fraction of it.
-    @State private var paneContentHeight: CGFloat = 0
     let paneId: PaneID
     let isFocused: Bool
     let isVisibleInUI: Bool
@@ -113,6 +112,7 @@ struct TerminalPanelView: View {
                 inactiveOverlayColor: appearance.unfocusedOverlayNSColor,
                 inactiveOverlayOpacity: appearance.unfocusedOverlayOpacity,
                 searchState: panel.searchState,
+                blueprintOverlay: blueprintOverlayBinding,
                 reattachToken: panel.viewReattachToken,
                 sessionContentWidthPresentation: sessionContentWidthPresentation,
                 onFocus: { _ in
@@ -130,19 +130,6 @@ struct TerminalPanelView: View {
             .reportTerminalViewportGeometryForUITest(panel: panel)
 #endif
             .layoutPriority(1)
-
-            if blueprintEnabled, panel.blueprint.isOpen {
-                TerminalBlueprintDrawerView(
-                    state: panel.blueprint,
-                    session: panel.blueprintWebSession,
-                    appearance: appearance,
-                    containerHeight: paneContentHeight,
-                    onRequestPanelFocus: {
-                        panel.blueprintDidBecomeFocused()
-                        onFocus()
-                    }
-                )
-            }
 
             if panel.isTextBoxActive {
                 TextBoxInputContainer(
@@ -197,14 +184,26 @@ struct TerminalPanelView: View {
             }
         }
         .background(Color(nsColor: appearance.contentBackgroundColor))
-        .onGeometryChange(for: CGFloat.self) { proxy in
-            proxy.size.height
-        } action: { height in
-            paneContentHeight = height
-        }
         .onReceive(NotificationCenter.default.publisher(for: .ghosttyConfigDidReload)) { _ in
             terminalFontSize = GhosttyConfig.loadForCmux(globalFontMagnificationPercent: GlobalFontMagnification.storedPercent).fontSize
         }
+    }
+
+    /// The blueprint bubble/popup for this pane, mounted by the terminal host
+    /// in the portal layer (never as a SwiftUI overlay); nil while the beta is off.
+    private var blueprintOverlayBinding: TerminalBlueprintOverlayBinding? {
+        guard blueprintEnabled else { return nil }
+        return TerminalBlueprintOverlayBinding(
+            state: panel.blueprint,
+            session: panel.blueprintWebSession,
+            isDark: MarkdownWebTheme.resolve(backgroundColor: appearance.backgroundColor).isDark,
+            backgroundColor: appearance.contentBackgroundColor,
+            foregroundColor: appearance.foregroundColor,
+            onPointerDown: {
+                panel.blueprintDidBecomeFocused()
+                onFocus()
+            }
+        )
     }
 
     private var sessionContentWidthPresentation: SessionContentWidthPresentation {

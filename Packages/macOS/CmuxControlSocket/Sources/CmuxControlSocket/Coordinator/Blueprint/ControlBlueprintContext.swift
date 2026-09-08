@@ -7,7 +7,6 @@ public struct ControlBlueprintStateSnapshot: Sendable, Equatable {
     /// The terminal surface that owns the drawer.
     public let surfaceID: UUID
     public let isOpen: Bool
-    public let isCollapsed: Bool
     /// Bumped by every accepted mutation, whoever authored it.
     public let revision: Int
     public let elementCount: Int
@@ -26,7 +25,6 @@ public struct ControlBlueprintStateSnapshot: Sendable, Equatable {
         workspaceID: UUID,
         surfaceID: UUID,
         isOpen: Bool,
-        isCollapsed: Bool,
         revision: Int,
         elementCount: Int,
         updatedBy: String,
@@ -38,7 +36,6 @@ public struct ControlBlueprintStateSnapshot: Sendable, Equatable {
         self.workspaceID = workspaceID
         self.surfaceID = surfaceID
         self.isOpen = isOpen
-        self.isCollapsed = isCollapsed
         self.revision = revision
         self.elementCount = elementCount
         self.updatedBy = updatedBy
@@ -68,7 +65,8 @@ public struct ControlBlueprintContent: Sendable, Equatable {
     }
 }
 
-/// The drawer verbs that need no canvas round trip.
+/// The popup verbs that need no canvas round trip. `collapse` and `expand`
+/// are drawer-era aliases of `hide` and `show`.
 public enum ControlBlueprintVisibilityAction: String, Sendable, Equatable {
     case show
     case hide
@@ -76,8 +74,8 @@ public enum ControlBlueprintVisibilityAction: String, Sendable, Equatable {
     case expand
 }
 
-/// The drawer after a visibility verb; `applied` is false when the verb was a
-/// no-op (collapsing a closed drawer), mirroring the in-app action path.
+/// The popup after a visibility verb; `applied` is false when the verb was a
+/// no-op (hiding a closed popup), mirroring the in-app action path.
 public struct ControlBlueprintVisibilityOutcome: Sendable, Equatable {
     public let applied: Bool
     public let state: ControlBlueprintStateSnapshot

@@ -9672,6 +9672,10 @@ final class GhosttySurfaceScrollView: NSView {
     private let imageTransferIndicatorSpinner: NSProgressIndicator
     private let imageTransferCancelButton: NSButton
     private var searchOverlayHostingView: NSHostingView<SurfaceSearchOverlay>?
+    /// The blueprint bubble + popup layer (Blueprint beta); see setBlueprintOverlay.
+    private var blueprintOverlayView: TerminalBlueprintOverlayView?
+    private let deferredBlueprintOverlayMutationScheduler = MainActorDeferredActionScheduler()
+    private var blueprintOverlayMutationGeneration: UInt64 = 0
     private let deferredSearchOverlayMutationScheduler = MainActorDeferredActionScheduler()
     private let imageTransferIndicatorShowScheduler = MainActorDeferredActionScheduler()
     private var activeImageTransferOperation: TerminalImageTransferOperation?
@@ -10302,6 +10306,15 @@ final class GhosttySurfaceScrollView: NSView {
            let hit = overlay.hitTest(convert(point, to: overlay)) {
             return hit
         }
+        // The blueprint bubble and popup take precedence over the pane drop
+        // target that layout keeps on top; everything else in that layer
+        // passes through to the terminal.
+        if let overlay = blueprintOverlayView,
+           overlay.superview === self,
+           let superview,
+           let hit = overlay.hitTest(convert(point, from: superview)) {
+            return hit
+        }
         return super.hitTest(point)
     }
 
@@ -10449,6 +10462,11 @@ final class GhosttySurfaceScrollView: NSView {
         synchronizeCloudTerminalReconnectOverlay()
         if let overlay = searchOverlayHostingView {
             _ = setFrameIfNeeded(overlay, to: contentFrame)
+        }
+        if let overlay = blueprintOverlayView {
+            if setFrameIfNeeded(overlay, to: contentFrame) {
+                overlay.layoutOverlay()
+            }
         }
         bringPaneDropTargetToFrontIfNeeded()
         // NSScrollView can defer clip-view/content-size updates until its own layout pass,
@@ -11091,6 +11109,52 @@ final class GhosttySurfaceScrollView: NSView {
                 force: force,
                 attemptsRemaining: attemptsRemaining - 1
             )
+        }
+    }
+
+    /// Mounts, updates, or removes the blueprint bubble/popup layer. Same
+    /// layering contract as the find bar: it lives in this portal-hosted view
+    /// so it never falls behind the terminal surface, and view-tree mutations
+    /// run on a deferred main-actor hop.
+    func setBlueprintOverlay(_ binding: TerminalBlueprintOverlayBinding?) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { [weak self] in self?.setBlueprintOverlay(binding) }
+            return
+        }
+        blueprintOverlayMutationGeneration &+= 1
+        let generation = blueprintOverlayMutationGeneration
+        guard let binding else {
+            guard let overlay = blueprintOverlayView else { return }
+            blueprintOverlayView = nil
+            deferredBlueprintOverlayMutationScheduler.schedule { [weak self, weak overlay] in
+                guard let self, self.blueprintOverlayMutationGeneration == generation else { return }
+                overlay?.detach()
+                overlay?.removeFromSuperview()
+            }
+            return
+        }
+        if let overlay = blueprintOverlayView {
+            overlay.apply(binding)
+            if overlay.superview !== self {
+                deferredBlueprintOverlayMutationScheduler.schedule { [weak self, weak overlay] in
+                    guard let self, let overlay, self.blueprintOverlayView === overlay else { return }
+                    overlay.frame = self.sessionContentFrame
+                    self.addSubview(overlay)
+                    self.updateKeyboardCopyModeBadgeZOrder(relativeTo: overlay)
+                    overlay.layoutOverlay()
+                }
+            }
+            return
+        }
+        let overlay = TerminalBlueprintOverlayView(frame: sessionContentFrame)
+        overlay.apply(binding)
+        blueprintOverlayView = overlay
+        deferredBlueprintOverlayMutationScheduler.schedule { [weak self, weak overlay] in
+            guard let self, let overlay, self.blueprintOverlayView === overlay else { return }
+            overlay.frame = self.sessionContentFrame
+            self.addSubview(overlay)
+            self.updateKeyboardCopyModeBadgeZOrder(relativeTo: overlay)
+            overlay.layoutOverlay()
         }
     }
 
@@ -12655,6 +12719,9 @@ final class GhosttySurfaceScrollView: NSView {
         var current: NSView? = view
         while let v = current {
             if v is NSHostingView<SurfaceSearchOverlay> { return true }
+            // The blueprint popup (Excalidraw web view) keeps keyboard focus
+            // like the find field does.
+            if v is TerminalBlueprintPopupView { return true }
             let typeName = String(describing: type(of: v))
             if typeName.contains("BrowserSearchOverlay") { return true }
             current = v.superview
@@ -13833,6 +13900,7 @@ struct GhosttyTerminalView: NSViewRepresentable {
     var inactiveOverlayColor: NSColor = .clear
     var inactiveOverlayOpacity: Double = 0
     var searchState: TerminalSurface.SearchState? = nil
+    var blueprintOverlay: TerminalBlueprintOverlayBinding? = nil
     var reattachToken: UInt64 = 0
     var sessionContentWidthPresentation = SessionContentWidthPresentation.disabled
     var onFocus: ((UUID) -> Void)? = nil
@@ -14068,7 +14136,8 @@ struct GhosttyTerminalView: NSViewRepresentable {
             inactiveOverlayOpacity: inactiveOverlayOpacity,
             showsInactiveOverlay: showsInactiveOverlay,
             searchState: searchState,
-            dropZone: forwardedDropZone
+            dropZone: forwardedDropZone,
+            blueprint: blueprintOverlay
         )
 
         let stagePortalReconciliation: @MainActor (

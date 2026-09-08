@@ -83,6 +83,9 @@ struct TerminalPortalReconciliationSnapshot {
     let showsInactiveOverlay: Bool
     let searchState: TerminalSurface.SearchState?
     let dropZone: DropZone?
+    /// The pane's blueprint bubble and popup, hosted in the portal layer like
+    /// the find bar; nil while the Blueprint beta is off.
+    let blueprint: TerminalBlueprintOverlayBinding?
 }
 
 extension GhosttyTerminalView {
@@ -251,6 +254,7 @@ extension GhosttyTerminalView {
             visible: snapshot.showsInactiveOverlay
         )
         hostedView.setSearchOverlay(searchState: snapshot.searchState)
+        hostedView.setBlueprintOverlay(snapshot.blueprint)
         hostedView.syncKeyStateIndicator(text: terminalSurface.currentKeyStateIndicatorText)
         hostedView.setDropZoneOverlay(zone: snapshot.dropZone)
     }

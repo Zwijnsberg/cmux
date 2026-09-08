@@ -10,6 +10,9 @@ final class TerminalBlueprintWebView: WKWebView {
 
     override var acceptsFirstResponder: Bool { true }
 
+    /// The first click into a popup over an unfocused pane counts.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override func mouseDown(with event: NSEvent) {
         onPointerDown?()
         super.mouseDown(with: event)

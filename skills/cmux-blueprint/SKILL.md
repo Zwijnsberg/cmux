@@ -5,8 +5,9 @@ description: Draw and read the Blueprint diagram canvas docked below the current
 
 # Blueprint canvas with cmux
 
-Every cmux terminal can have a Blueprint drawer: an Excalidraw canvas below the
-terminal that you draw into and the user sketches on. Inside a cmux terminal
+Every cmux terminal can have a Blueprint: an Excalidraw canvas that pops up
+over the terminal (from a bubble in its top-right corner) that you draw into
+and the user sketches on. Inside a cmux terminal
 with the Blueprint beta on, the `cmux-blueprint` MCP tools are attached to your
 session; the `cmux blueprint` CLI does the same from a shell.
 
@@ -39,8 +40,8 @@ blueprint_update        ops=[{op: upsert, element: {id: "...", ...}}, {op: delet
 blueprint_export_image  format=png  path=/abs/path/docs/architecture.png
 ```
 
-If the drawer is closed, drawing opens it (the user can turn that off; then
-the drawer shows an "updated by agent" badge instead). `blueprint_show` and
+If the popup is closed, drawing opens it (the user can turn that off; then
+the bubble shows a dot instead). `blueprint_show` and
 `blueprint_hide` never move keyboard focus.
 
 ## From a shell

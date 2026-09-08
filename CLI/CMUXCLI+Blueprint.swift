@@ -11,7 +11,7 @@ extension CMUXCLI {
     (Settings › Beta Features › Blueprint must be on).
 
     Subcommands:
-      state                       Drawer visibility, revision, element count, and a text summary
+      state                       Popup visibility, revision, element count, and a text summary
       get [--format summary|json|mermaid]
                                   Print the canvas in one format (default: summary)
       set [<scene.json>|-] [--base-revision N] [--source agent|user]
@@ -24,8 +24,8 @@ extension CMUXCLI {
                                   Save the canvas (PNG/SVG) or print a text format
       send [--formats png,mermaid,summary,json] [--prefix <text>] [--submit]
                                   Paste the canvas (PNG path and Mermaid by default) into the terminal prompt
-      show | hide | collapse | expand [--focus true|false]
-                                  Drawer visibility; show never moves focus unless --focus true
+      show | hide [--focus true|false]
+                                  Popup visibility (collapse/expand are aliases); show never moves focus unless --focus true
       mcp                         Run the cmux-blueprint MCP server on stdio (agent wrappers use this)
 
     Target options (all subcommands):
@@ -294,11 +294,8 @@ extension CMUXCLI {
         let revision = (payload["revision"] as? Int) ?? 0
         let count = (payload["element_count"] as? Int) ?? 0
         let visible = (payload["visible"] as? Bool) == true
-        let collapsed = (payload["collapsed"] as? Bool) == true
         let updatedBy = (payload["updated_by"] as? String) ?? "user"
-        var drawer = visible ? "visible" : "hidden"
-        if visible, collapsed { drawer = "collapsed" }
-        var lines = ["revision=\(revision) elements=\(count) drawer=\(drawer) updated_by=\(updatedBy)"]
+        var lines = ["revision=\(revision) elements=\(count) popup=\(visible ? "visible" : "hidden") updated_by=\(updatedBy)"]
         if includeSummary, let summary = payload["summary"] as? String, !summary.isEmpty {
             lines.append(summary)
         }

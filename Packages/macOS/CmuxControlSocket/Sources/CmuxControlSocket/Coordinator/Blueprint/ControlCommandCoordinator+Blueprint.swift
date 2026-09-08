@@ -92,7 +92,6 @@ extension ControlCommandCoordinator {
             "surface_id": .string(snapshot.surfaceID.uuidString),
             "surface_ref": ref(.surface, snapshot.surfaceID),
             "visible": .bool(snapshot.isOpen),
-            "collapsed": .bool(snapshot.isCollapsed),
             "revision": .int(Int64(snapshot.revision)),
             "element_count": .int(Int64(snapshot.elementCount)),
             "updated_by": .string(snapshot.updatedBy),

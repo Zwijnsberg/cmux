@@ -17,16 +17,23 @@ struct SessionTerminalBlueprintSnapshotTests {
         #expect(snapshot.blueprint == nil)
     }
 
-    @Test("blueprint drawer state round-trips inside the terminal snapshot")
+    @Test("blueprint popup state round-trips inside the terminal snapshot")
     func roundTrip() throws {
         let original = SessionTerminalPanelSnapshot(
             workingDirectory: "/repo",
-            blueprint: SessionTerminalBlueprintSnapshot(isOpen: true, layout: .split(fraction: 0.55), revision: 12)
+            blueprint: SessionTerminalBlueprintSnapshot(isOpen: true, layout: .floating(widthFraction: 0.55, heightFraction: 0.7), revision: 12)
         )
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(SessionTerminalPanelSnapshot.self, from: data)
         #expect(decoded.blueprint == original.blueprint)
-        #expect(decoded.blueprint?.layout == .split(fraction: 0.55))
+        #expect(decoded.blueprint?.layout == .floating(widthFraction: 0.55, heightFraction: 0.7))
         #expect(decoded.blueprint?.revision == 12)
+    }
+
+    @Test("a drawer-era snapshot decodes to the default popup coverage")
+    func legacyLayoutDecode() throws {
+        let json = #"{"workingDirectory":"/tmp","blueprint":{"isOpen":true,"layout":{"kind":"split","fraction":0.4},"revision":3}}"#
+        let snapshot = try JSONDecoder().decode(SessionTerminalPanelSnapshot.self, from: Data(json.utf8))
+        #expect(snapshot.blueprint == SessionTerminalBlueprintSnapshot(isOpen: true, layout: .fitted, revision: 3))
     }
 }

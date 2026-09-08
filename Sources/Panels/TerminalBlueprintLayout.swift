@@ -1,33 +1,32 @@
 import Foundation
 
-/// How much of its terminal pane an open blueprint drawer occupies.
+/// How the blueprint popup sits over its terminal pane.
 ///
-/// The drawer sits below the Ghostty surface inside the same pane. `collapsed`
-/// shows only the header bar, `split` shares the pane at a user-dragged
-/// fraction, and `enlarged` gives the canvas most of the pane while keeping a
-/// minimum terminal height so the hosted terminal view never reaches zero size.
+/// The popup is anchored to the pane's top-right corner, under the bubble
+/// button. `fitted` is the default coverage: the pane minus a buffer on every
+/// side so the terminal stays partly visible. Once the user drags a resize
+/// handle the size is kept as fractions of the pane (`floating`), so a
+/// narrower split keeps the same proportions. `enlarged` fills the pane.
 enum TerminalBlueprintLayout: Equatable, Sendable {
-    case collapsed
-    case split(fraction: Double)
+    case fitted
+    case floating(widthFraction: Double, heightFraction: Double)
     case enlarged
 
-    static let defaultSplitFraction = 0.4
-    static let minimumSplitFraction = 0.15
-    static let maximumSplitFraction = 0.85
-    static let enlargedFraction = 0.85
-    /// Height of the header bar, the only thing visible while collapsed.
+    /// Space left around the popup in the default (`fitted`) layout.
+    static let sideInset = 24.0
+    static let bottomInset = 24.0
+    /// Room above the popup for the bubble row.
+    static let topInset = 44.0
+    /// The popup never shrinks below this size, whatever the fractions say.
+    static let minimumPopupSize = CGSize(width: 240, height: 160)
+    static let minimumFraction = 0.2
+    static let maximumFraction = 1.0
+    /// Height of the popup's header bar.
     static let headerHeight = 30.0
-    /// The terminal keeps at least this many points however large the drawer is.
-    static let minimumTerminalHeight = 96.0
 
     static func clampedFraction(_ fraction: Double) -> Double {
-        guard fraction.isFinite else { return defaultSplitFraction }
-        return min(maximumSplitFraction, max(minimumSplitFraction, fraction))
-    }
-
-    var isCollapsed: Bool {
-        if case .collapsed = self { return true }
-        return false
+        guard fraction.isFinite else { return maximumFraction }
+        return min(maximumFraction, max(minimumFraction, fraction))
     }
 
     var isEnlarged: Bool {
@@ -35,63 +34,93 @@ enum TerminalBlueprintLayout: Equatable, Sendable {
         return false
     }
 
-    /// The pane fraction the drawer wants, or nil while collapsed.
-    var fraction: Double? {
-        switch self {
-        case .collapsed:
-            return nil
-        case .split(let fraction):
-            return Self.clampedFraction(fraction)
-        case .enlarged:
-            return Self.enlargedFraction
+    /// The popup's frame inside a pane of `paneSize`, in the pane's
+    /// coordinate space with the origin at the top-left (y grows downward).
+    func popupFrame(in paneSize: CGSize) -> CGRect {
+        guard paneSize.width.isFinite, paneSize.height.isFinite, paneSize.width > 0, paneSize.height > 0 else {
+            return .zero
         }
+        let available = CGSize(
+            width: max(0, paneSize.width - Self.sideInset * 2),
+            height: max(0, paneSize.height - Self.topInset - Self.bottomInset)
+        )
+        var size: CGSize
+        switch self {
+        case .fitted:
+            size = available
+        case .floating(let widthFraction, let heightFraction):
+            size = CGSize(
+                width: available.width * Self.clampedFraction(widthFraction),
+                height: available.height * Self.clampedFraction(heightFraction)
+            )
+        case .enlarged:
+            size = CGSize(width: paneSize.width, height: max(0, paneSize.height - Self.topInset))
+        }
+        size.width = min(max(size.width, min(Self.minimumPopupSize.width, available.width)), paneSize.width)
+        size.height = min(max(size.height, min(Self.minimumPopupSize.height, available.height)), paneSize.height - Self.topInset)
+        let inset = isEnlarged ? 0 : Self.sideInset
+        return CGRect(
+            x: paneSize.width - inset - size.width,
+            y: Self.topInset,
+            width: size.width,
+            height: size.height
+        )
     }
 
-    /// Resolves the drawer height for a pane of `containerHeight` points.
-    func drawerHeight(containerHeight: Double) -> Double {
-        guard let fraction, containerHeight.isFinite, containerHeight > 0 else {
-            return Self.headerHeight
-        }
-        let requested = containerHeight * fraction
-        let maximum = max(Self.headerHeight, containerHeight - Self.minimumTerminalHeight)
-        return max(Self.headerHeight, min(requested, maximum))
+    /// The layout that gives a popup of `size` in a pane of `paneSize`,
+    /// as fractions of the fitted area so it scales with the pane.
+    static func floating(size: CGSize, in paneSize: CGSize) -> TerminalBlueprintLayout {
+        let available = CGSize(
+            width: max(1, paneSize.width - sideInset * 2),
+            height: max(1, paneSize.height - topInset - bottomInset)
+        )
+        return .floating(
+            widthFraction: clampedFraction(size.width / available.width),
+            heightFraction: clampedFraction(size.height / available.height)
+        )
     }
 }
 
 extension TerminalBlueprintLayout: Codable {
     private enum CodingKeys: String, CodingKey {
         case kind
-        case fraction
+        case widthFraction
+        case heightFraction
     }
 
     private enum Kind: String, Codable {
+        case fitted
+        case floating
+        case enlarged
+        // Layouts of the former drawer design decode to the default coverage.
         case collapsed
         case split
-        case enlarged
     }
 
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(Kind.self, forKey: .kind) {
-        case .collapsed:
-            self = .collapsed
-        case .split:
-            let fraction = try container.decodeIfPresent(Double.self, forKey: .fraction)
-                ?? Self.defaultSplitFraction
-            self = .split(fraction: Self.clampedFraction(fraction))
+        let kind = (try? container.decode(Kind.self, forKey: .kind)) ?? .fitted
+        switch kind {
+        case .fitted, .collapsed, .split:
+            self = .fitted
         case .enlarged:
             self = .enlarged
+        case .floating:
+            let width = try container.decodeIfPresent(Double.self, forKey: .widthFraction) ?? Self.maximumFraction
+            let height = try container.decodeIfPresent(Double.self, forKey: .heightFraction) ?? Self.maximumFraction
+            self = .floating(widthFraction: Self.clampedFraction(width), heightFraction: Self.clampedFraction(height))
         }
     }
 
     func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .collapsed:
-            try container.encode(Kind.collapsed, forKey: .kind)
-        case .split(let fraction):
-            try container.encode(Kind.split, forKey: .kind)
-            try container.encode(Self.clampedFraction(fraction), forKey: .fraction)
+        case .fitted:
+            try container.encode(Kind.fitted, forKey: .kind)
+        case .floating(let width, let height):
+            try container.encode(Kind.floating, forKey: .kind)
+            try container.encode(width, forKey: .widthFraction)
+            try container.encode(height, forKey: .heightFraction)
         case .enlarged:
             try container.encode(Kind.enlarged, forKey: .kind)
         }

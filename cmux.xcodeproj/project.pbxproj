@@ -2657,10 +2657,10 @@
 		B1E0B1E0000000000000000F /* TerminalBlueprintBridgeMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1E0B1E00000000000000010 /* TerminalBlueprintBridgeMessage.swift */; };
 		B1E0B1E00000000000000025 /* TerminalBlueprintBridgeMessageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1E0B1E00000000000000026 /* TerminalBlueprintBridgeMessageTests.swift */; };
 		B1E0B1E00000000000000009 /* TerminalBlueprintDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1E0B1E0000000000000000A /* TerminalBlueprintDocument.swift */; };
-		B1E0B1E0000000000000001B /* TerminalBlueprintDrawerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1E0B1E0000000000000001C /* TerminalBlueprintDrawerView.swift */; };
 		B1E0B1E00000000000000001 /* TerminalBlueprintFeature.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1E0B1E00000000000000002 /* TerminalBlueprintFeature.swift */; };
 		B1E0B1E00000000000000007 /* TerminalBlueprintLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1E0B1E00000000000000008 /* TerminalBlueprintLayout.swift */; };
 		B1E0B1E0000000000000001D /* TerminalBlueprintLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1E0B1E0000000000000001E /* TerminalBlueprintLayoutTests.swift */; };
+		B1E0B1E0000000000000001B /* TerminalBlueprintOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1E0B1E0000000000000001C /* TerminalBlueprintOverlayView.swift */; };
 		B1E0B1E0000000000000002B /* TerminalBlueprintPromptComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1E0B1E0000000000000002C /* TerminalBlueprintPromptComposer.swift */; };
 		B1E0B1E00000000000000033 /* TerminalBlueprintPromptComposerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1E0B1E00000000000000034 /* TerminalBlueprintPromptComposerTests.swift */; };
 		B1E0B1E00000000000000029 /* TerminalBlueprintScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1E0B1E0000000000000002A /* TerminalBlueprintScene.swift */; };
@@ -5904,10 +5904,10 @@ B8B056D80000000000000002 /* MobileHostIdentityTests.swift */ = {isa = PBXFileRef
 		B1E0B1E00000000000000010 /* TerminalBlueprintBridgeMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Panels/TerminalBlueprintBridgeMessage.swift"; sourceTree = "<group>"; };
 		B1E0B1E00000000000000026 /* TerminalBlueprintBridgeMessageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalBlueprintBridgeMessageTests.swift; sourceTree = "<group>"; };
 		B1E0B1E0000000000000000A /* TerminalBlueprintDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Panels/TerminalBlueprintDocument.swift"; sourceTree = "<group>"; };
-		B1E0B1E0000000000000001C /* TerminalBlueprintDrawerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Panels/TerminalBlueprintDrawerView.swift"; sourceTree = "<group>"; };
 		B1E0B1E00000000000000002 /* TerminalBlueprintFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalBlueprintFeature.swift; sourceTree = "<group>"; };
 		B1E0B1E00000000000000008 /* TerminalBlueprintLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Panels/TerminalBlueprintLayout.swift"; sourceTree = "<group>"; };
 		B1E0B1E0000000000000001E /* TerminalBlueprintLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalBlueprintLayoutTests.swift; sourceTree = "<group>"; };
+		B1E0B1E0000000000000001C /* TerminalBlueprintOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Panels/TerminalBlueprintOverlayView.swift"; sourceTree = "<group>"; };
 		B1E0B1E0000000000000002C /* TerminalBlueprintPromptComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Panels/TerminalBlueprintPromptComposer.swift"; sourceTree = "<group>"; };
 		B1E0B1E00000000000000034 /* TerminalBlueprintPromptComposerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalBlueprintPromptComposerTests.swift; sourceTree = "<group>"; };
 		B1E0B1E0000000000000002A /* TerminalBlueprintScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Panels/TerminalBlueprintScene.swift"; sourceTree = "<group>"; };
@@ -8106,7 +8106,7 @@ B8B056D80000000000000002 /* MobileHostIdentityTests.swift */ = {isa = PBXFileRef
 				B1E0B1E00000000000000016 /* CmuxBlueprintURLSchemeHandler.swift */,
 				B1E0B1E00000000000000018 /* TerminalBlueprintWebView.swift */,
 				B1E0B1E0000000000000001A /* TerminalBlueprintWebRenderer.swift */,
-				B1E0B1E0000000000000001C /* TerminalBlueprintDrawerView.swift */,
+				B1E0B1E0000000000000001C /* TerminalBlueprintOverlayView.swift */,
 				80410000000000000000000A /* AppDelegate+AdjacentNavigationShortcut.swift */,
 				C0DE45AC0000000000000002 /* AppDelegate+AgentChat.swift */,
 				C0DEB01C0000000000000202 /* TerminalController+ControlSurfaceVoice.swift */,
@@ -12146,9 +12146,9 @@ B8B056D80000000000000002 /* MobileHostIdentityTests.swift */ = {isa = PBXFileRef
 				A10199010000000000000001 /* TerminalAdaptiveDefaultThemeSettings.swift in Sources */,
 				B1E0B1E0000000000000000F /* TerminalBlueprintBridgeMessage.swift in Sources */,
 				B1E0B1E00000000000000009 /* TerminalBlueprintDocument.swift in Sources */,
-				B1E0B1E0000000000000001B /* TerminalBlueprintDrawerView.swift in Sources */,
 				B1E0B1E00000000000000001 /* TerminalBlueprintFeature.swift in Sources */,
 				B1E0B1E00000000000000007 /* TerminalBlueprintLayout.swift in Sources */,
+				B1E0B1E0000000000000001B /* TerminalBlueprintOverlayView.swift in Sources */,
 				B1E0B1E0000000000000002B /* TerminalBlueprintPromptComposer.swift in Sources */,
 				B1E0B1E00000000000000029 /* TerminalBlueprintScene.swift in Sources */,
 				B1E0B1E00000000000000011 /* TerminalBlueprintState.swift in Sources */,

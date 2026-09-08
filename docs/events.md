@@ -327,14 +327,13 @@ Blueprint:
 
 | Name | Trigger |
 | --- | --- |
-| `blueprint.changed` | The diagram canvas of a terminal accepted a change: a user edit in the drawer, or an agent/CLI `set`, `apply_ops`, `render_mermaid`, or clear. |
-| `blueprint.visibility` | The drawer opened, closed, collapsed, or expanded, from any entrypoint. |
+| `blueprint.changed` | The diagram canvas of a terminal accepted a change: a user edit in the popup, or an agent/CLI `set`, `apply_ops`, `render_mermaid`, or clear. |
+| `blueprint.visibility` | The popup opened or closed, from any entrypoint. |
 | `blueprint.sent_to_terminal` | The canvas was pasted into the terminal prompt ("Send to Terminal"). |
 
 Blueprint payloads carry `workspace_id` and `surface_id` (the terminal), plus
 `revision`, `updated_by` (`user`, `agent`, `restore`), and `element_count` for
-changes; `visible` and `collapsed` for visibility; `revision` and `formats` for
-sends. Scenes, images, and Mermaid text never appear in events. User edits are
+changes; `visible` for visibility; `revision` and `formats` for sends. Scenes, images, and Mermaid text never appear in events. User edits are
 coalesced by the canvas (about 400 ms) before one change event is published.
 
 Feed and agent hooks:

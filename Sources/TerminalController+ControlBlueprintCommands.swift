@@ -271,7 +271,6 @@ extension TerminalController {
             "element_count": .int(Int64(state.elementCount)),
             "updated_by": .string(state.updatedBy.rawValue),
             "visible": .bool(state.isOpen),
-            "collapsed": .bool(state.layout.isCollapsed),
         ]
     }
 

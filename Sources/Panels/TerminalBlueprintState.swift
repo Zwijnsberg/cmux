@@ -44,11 +44,10 @@ struct TerminalBlueprintChange: Equatable, Sendable {
     var elementCount: Int
 }
 
-/// The drawer's visibility, for event publication.
+/// The popup's visibility, for event publication.
 struct TerminalBlueprintVisibility: Equatable, Sendable {
     var surfaceID: UUID
     var isOpen: Bool
-    var isCollapsed: Bool
 }
 
 /// Persistence seam for blueprint documents; `TerminalBlueprintStore` is the
@@ -109,9 +108,13 @@ final class TerminalBlueprintState {
         case toggle
         case open
         case close
+        /// Hides the popup (kept as an alias of `close` for the socket/CLI verbs).
         case collapse
+        /// Shows the popup (kept as an alias of `open` for the socket/CLI verbs).
         case expand
+        /// Fills the pane.
         case enlarge
+        /// Back to the remembered floating size.
         case restore
         case zoomToFit
         case clear
@@ -125,7 +128,7 @@ final class TerminalBlueprintState {
     }
 
     private(set) var isOpen = false
-    private(set) var layout: TerminalBlueprintLayout = .split(fraction: TerminalBlueprintLayout.defaultSplitFraction)
+    private(set) var layout: TerminalBlueprintLayout = .fitted
     private(set) var revision = 0
     private(set) var updatedBy: TerminalBlueprintDocument.Author = .user
     private(set) var hasUnseenAgentUpdate = false
@@ -166,7 +169,8 @@ final class TerminalBlueprintState {
     @ObservationIgnored private var loadTask: Task<Void, Never>?
     @ObservationIgnored private var pushTask: Task<Void, Never>?
     @ObservationIgnored private var didLoadDocument = false
-    @ObservationIgnored private var lastSplitFraction = TerminalBlueprintLayout.defaultSplitFraction
+    /// The non-enlarged layout to return to from `enlarged`.
+    @ObservationIgnored private var lastFloatingLayout: TerminalBlueprintLayout = .fitted
     @ObservationIgnored private var pendingExports: [String: CheckedContinuation<TerminalBlueprintExportResult, any Error>] = [:]
     @ObservationIgnored private var exportTimeoutTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var readyWaiters: [UUID: CheckedContinuation<Void, any Error>] = [:]
@@ -192,9 +196,10 @@ final class TerminalBlueprintState {
 
     // MARK: - Derived state
 
-    /// True when the drawer is open and showing the canvas (not just the header).
+    /// True while the popup is showing the canvas. (The drawer design could
+    /// be open but collapsed to a header; the popup cannot.)
     var isExpanded: Bool {
-        isOpen && !layout.isCollapsed
+        isOpen
     }
 
     var surfaceID: UUID {
@@ -221,12 +226,12 @@ final class TerminalBlueprintState {
             close()
             return true
         case .collapse:
-            guard isOpen, !layout.isCollapsed else { return false }
-            collapse()
+            guard isOpen else { return false }
+            close()
             return true
         case .expand:
-            guard isOpen, layout.isCollapsed else { return false }
-            expand()
+            guard !isOpen else { return false }
+            open()
             return true
         case .enlarge:
             guard isOpen, !layout.isEnlarged else { return false }
@@ -253,9 +258,6 @@ final class TerminalBlueprintState {
 
     func open() {
         isOpen = true
-        if layout.isCollapsed {
-            layout = .split(fraction: lastSplitFraction)
-        }
         hasUnseenAgentUpdate = false
         loadDocumentIfNeeded()
         notifyVisibility()
@@ -266,23 +268,47 @@ final class TerminalBlueprintState {
         notifyVisibility()
     }
 
+    /// Alias of `close` kept for the drawer-era verbs.
     func collapse() {
-        rememberSplitFraction()
-        layout = .collapsed
-        notifyVisibility()
+        close()
     }
 
+    /// Alias of `open` kept for the drawer-era verbs.
     func expand() {
-        layout = .split(fraction: lastSplitFraction)
-        hasUnseenAgentUpdate = false
-        notifyVisibility()
+        open()
+    }
+
+    func enlarge() {
+        if !layout.isEnlarged {
+            lastFloatingLayout = layout
+        }
+        layout = .enlarged
+    }
+
+    func restoreSplit() {
+        layout = lastFloatingLayout
+    }
+
+    /// Applies a drag-resize of the popup to `size` inside a pane of
+    /// `paneSize`. The size is remembered as fractions of the pane for this
+    /// terminal only, so it survives close, reopen, and restart.
+    func setPopupSize(_ size: CGSize, paneSize: CGSize) {
+        guard paneSize.width > 0, paneSize.height > 0 else { return }
+        let floating = TerminalBlueprintLayout.floating(size: size, in: paneSize)
+        lastFloatingLayout = floating
+        layout = floating
+    }
+
+    /// Forgets a dragged size: the popup goes back to the default coverage.
+    func resetPopupSize() {
+        lastFloatingLayout = .fitted
+        layout = .fitted
     }
 
     private func notifyVisibility() {
         onVisibilityChange?(TerminalBlueprintVisibility(
             surfaceID: surfaceID,
-            isOpen: isOpen,
-            isCollapsed: layout.isCollapsed
+            isOpen: isOpen
         ))
     }
 
@@ -295,27 +321,6 @@ final class TerminalBlueprintState {
         ))
     }
 
-    func enlarge() {
-        rememberSplitFraction()
-        layout = .enlarged
-    }
-
-    func restoreSplit() {
-        layout = .split(fraction: lastSplitFraction)
-    }
-
-    /// Applies a drag-resize. Enlarged drawers become a plain split.
-    func setSplitFraction(_ fraction: Double) {
-        let clamped = TerminalBlueprintLayout.clampedFraction(fraction)
-        lastSplitFraction = clamped
-        layout = .split(fraction: clamped)
-    }
-
-    private func rememberSplitFraction() {
-        if case .split(let fraction) = layout {
-            lastSplitFraction = TerminalBlueprintLayout.clampedFraction(fraction)
-        }
-    }
 
     // MARK: - Bridge
 
@@ -435,8 +440,7 @@ final class TerminalBlueprintState {
         let shouldOpen = autoOpen ?? TerminalBlueprintFeature.autoOpensOnAgentUpdate(defaults: defaults)
         if shouldOpen {
             if !isOpen { open() }
-            if layout.isCollapsed { expand() }
-        } else if !isExpanded {
+        } else if !isOpen {
             hasUnseenAgentUpdate = true
         }
     }
@@ -774,8 +778,8 @@ final class TerminalBlueprintState {
         guard let snapshot else { return }
         revision = max(revision, snapshot.revision)
         layout = snapshot.layout
-        if case .split(let fraction) = snapshot.layout {
-            lastSplitFraction = TerminalBlueprintLayout.clampedFraction(fraction)
+        if !snapshot.layout.isEnlarged {
+            lastFloatingLayout = snapshot.layout
         }
         isOpen = snapshot.isOpen
         if isOpen {

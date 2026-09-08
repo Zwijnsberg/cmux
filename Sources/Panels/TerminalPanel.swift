@@ -185,7 +185,10 @@ final class TerminalPanel: Panel, ObservableObject {
         self.blueprint = TerminalBlueprintState(store: blueprintStore)
         blueprint.surfaceIDProvider = { [weak self] in self?.stableSurfaceId ?? UUID() }
         blueprint.onRequestTerminalFocus = { [weak self] in
-            _ = self?.focusTerminalSurface(respectForeignFirstResponder: false)
+            // Escape in the canvas: close the popup and hand focus back.
+            guard let self else { return }
+            self.blueprint.perform(.close)
+            _ = self.focusTerminalSurface(respectForeignFirstResponder: false)
         }
         blueprint.onCanvasRequested = { [weak self] in
             self?.ensureBlueprintCanvasLoaded()
@@ -539,7 +542,6 @@ final class TerminalPanel: Panel, ObservableObject {
             surfaceId: id.uuidString,
             payload: [
                 "visible": visibility.isOpen,
-                "collapsed": visibility.isCollapsed,
             ]
         )
     }

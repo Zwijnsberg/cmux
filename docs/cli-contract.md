@@ -673,21 +673,21 @@ every tick without churning item identities.
 
 ## Blueprint
 
-`cmux blueprint` drives the Blueprint diagram canvas docked below a terminal
+`cmux blueprint` drives the Blueprint diagram canvas that pops up over a terminal
 (Settings › Beta Features › Blueprint). Every subcommand is one `blueprint.*`
 socket method; the socket answers `unavailable` with `data.setting =
 "blueprint.beta.enabled"` while the beta is off.
 
 | Subcommand | Socket method | Notes |
 | --- | --- | --- |
-| `state` | `blueprint.state` | Drawer visibility, `revision`, `element_count`, `updated_by`, `canvas_ready`, `has_mermaid`, and the compact text `summary`. |
+| `state` | `blueprint.state` | Popup visibility (`visible`), `revision`, `element_count`, `updated_by`, `canvas_ready`, `has_mermaid`, and the compact text `summary`. |
 | `get [--format summary\|json\|mermaid]` | `blueprint.get` | `content` is the summary, the Excalidraw scene, or the last Mermaid source (`null` when none). |
 | `set [<scene.json>\|-] [--base-revision N] [--source agent\|user]` | `blueprint.set` | Replaces the scene. Limits: 1 MiB, 2,000 elements. |
 | `mermaid [<file.mmd>\|-] [--append] [--base-revision N]` | `blueprint.render_mermaid` | Renders Mermaid in the canvas (`mode` replace or append). Limit: 32 KiB. |
 | `ops [<ops.json>\|-] [--base-revision N]` | `blueprint.apply_ops` | `[{op: upsert, element}, {op: delete, id}, {op: clear}]`, at most 500. |
 | `export [--format png\|svg\|json\|mermaid\|summary] [--out <path>] [--scale N] [--dark]` | `blueprint.export` | PNG/SVG go to `--out` or next to the stored document; text formats print without `--out`. |
 | `send [--formats png,mermaid,summary,json] [--prefix <text>] [--submit]` | `blueprint.send_to_terminal` | Pastes one block into the terminal prompt. Default formats: `png,mermaid`. |
-| `show` / `hide` / `collapse` / `expand` / `toggle` `[--focus true\|false]` | `blueprint.show` … | Drawer verbs. `show` moves app focus only with `--focus true`. |
+| `show` / `hide` / `toggle` `[--focus true\|false]` | `blueprint.show`, `blueprint.hide` | Popup verbs (`collapse` and `expand` are aliases of hide and show). `show` moves app focus only with `--focus true`. |
 | `mcp` | (stdio) | The `cmux-blueprint` MCP server; the Claude Code and Codex wrappers attach it. Runs without a live socket. |
 
 Targeting follows the surface selection contract: `--surface` names the
