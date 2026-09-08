@@ -99,8 +99,8 @@ def with_reply_hint(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
     """Attach an instruction for the spoken reply.
 
     Ultravox sees the tool result as data; the hint states what kind of reply
-    this outcome needs. Actions get exactly one word ("Done."); questions get
-    an answer; problems get a few words.
+    this outcome needs. Actions get silence (the result on screen is the
+    confirmation); questions get an answer; problems get a few words.
     """
     out = dict(result)
     if out.get("reply"):
@@ -117,9 +117,9 @@ def with_reply_hint(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
     elif tool_name in QUERY_TOOLS:
         out["reply"] = "Answer the user's question from this information in one or two short spoken sentences."
     elif tool_name in {"run_shell", "run_command"} and out.get("output"):
-        out["reply"] = "If the user asked a question, answer it from the output in one short sentence (read short lists, summarize long output). If they asked for an action, say only: Done."
+        out["reply"] = "If the user asked a question, answer it from the output in one short sentence (read short lists, summarize long output). If they asked for an action, say nothing at all."
     else:
-        out["reply"] = "Say only the word: Done. Nothing else."
+        out["reply"] = "Say nothing at all: no confirmation, no description of what happened. Respond with silence."
     return out
 
 
@@ -136,7 +136,7 @@ def semantic_command_notice(command: str, result: Dict[str, Any]) -> str:
     box (Send or Clear) instead of speaking."""
     if result.get("ok"):
         said = "sent to the agent and the box is empty again" if command == "send" else "cleared the box"
-        return f'[Semantic mode: the user pressed {command.capitalize()} on the box; it {said}. Say exactly: "{result.get("say") or "Done."}"]'
+        return f"[Semantic mode: the user pressed {command.capitalize()} on the box; it {said}. Say nothing.]"
     return f"[Semantic mode: the user pressed {command.capitalize()} on the box, but it failed. Say in a few words: {result.get('say')}]"
 
 

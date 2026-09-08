@@ -142,7 +142,8 @@ def test_prompt_is_hands_free():
 
     prompt = build_system_prompt()
     # Actions end with one word; prompts to agents are sent without "enter".
-    assert 'say exactly one word: "Done."' in prompt
+    assert "say nothing at all" in prompt
+    assert "say exactly one word" not in prompt and 'say only "Done."' not in prompt
     assert "Never ask the user to say \"enter\"" in prompt
     assert "never wait for them to confirm the prompt" in prompt
     # Speak only when spoken to, or when an agent finishes.
@@ -164,7 +165,7 @@ def test_reply_hints_cover_every_outcome():
     assert "Answer the user" in bot.with_reply_hint("which_pane", {"ok": True, "say": "pane 1"})["reply"]
     # Every successful action: one word, nothing else.
     for name in ("split", "compose_and_type", "open_agent", "focus_workspace", "press_enter"):
-        assert bot.with_reply_hint(name, {"ok": True, "say": "Done."})["reply"] == "Say only the word: Done. Nothing else."
+        assert bot.with_reply_hint(name, {"ok": True, "say": "Done."})["reply"].startswith("Say nothing at all")
     assert "answer it from the output" in bot.with_reply_hint("run_shell", {"ok": True, "say": "Ran ls.", "output": "a.txt"})["reply"]
     # A handler that already says how to reply (summaries) is left alone.
     assert bot.with_reply_hint("summarize_agent", {"ok": True, "say": "…", "reply": "Summarize this."})["reply"] == "Summarize this."

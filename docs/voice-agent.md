@@ -58,7 +58,8 @@ panel makes the next start a first session again).
 After that it speaks only when spoken to:
 
 - An action ("split right", "go to the API workspace", "tell it to add tests")
-  is done the moment it is recognized, silently, followed by one word: "Done."
+  is done the moment it is recognized, silently. It does not say "Done" or
+  confirm in any way; what changed on screen is the confirmation.
   There is no preamble, no readback, and no offer of next steps.
 - A question ("what do I have open", "which branch is this", "list the files")
   gets a one- or two-sentence answer from the tool result.

@@ -117,7 +117,7 @@ async def test_send_types_into_the_semantic_terminal_and_empties_box(stools: Voi
     await stools.set_semantic_mode("S-B2", "codex")  # not the focused terminal on purpose
     await stools.semantic_finalize("Add a retry to the fetch helper.")
     res = await stools.semantic_send()
-    assert res["ok"] and res["say"] == "Sent." and res["reply"] == "Say only: Sent."
+    assert res["ok"] and res["say"] == "Sent." and res["reply"].startswith("Say nothing")
     typed = [r for r in fake.requests if r["method"] == "surface.send_text"]
     keys = [r for r in fake.requests if r["method"] == "surface.send_key"]
     assert typed[-1]["params"] == {"surface_id": "S-B2", "text": "Add a retry to the fetch helper."}
@@ -197,7 +197,7 @@ def test_bot_notice_for_box_buttons():
     import bot
 
     ok = bot.semantic_command_notice("send", {"ok": True, "say": "Sent."})
-    assert "pressed Send" in ok and '"Sent."' in ok
+    assert "pressed Send" in ok and "Say nothing" in ok
     bad = bot.semantic_command_notice("clear", {"ok": False, "say": "Semantic mode is off."})
     assert "failed" in bad and "Semantic mode is off." in bad
 

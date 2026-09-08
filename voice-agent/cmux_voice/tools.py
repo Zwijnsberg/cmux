@@ -158,6 +158,19 @@ class VoiceTools:
         except CmuxError:
             return None
 
+    async def _land_in(self, surface_id: Optional[str], *, keyboard: bool = True) -> None:
+        """Move the user into a surface that was just created. Creating a
+        terminal must leave the user *in* it (pane focus and the keyboard
+        cursor), so they never have to ask to switch to it afterwards."""
+        try:
+            if surface_id:
+                await self.client.acall("surface.focus", {"surface_id": surface_id})
+            if keyboard:
+                params = {"surface_id": surface_id} if surface_id else {}
+                await self.client.acall("surface.focus_input", params)
+        except CmuxError:
+            pass  # the surface exists; focus is best effort
+
     async def _done(self, say: str, flash_surface: Optional[str] = None, **extra: Any) -> Dict[str, Any]:
         if flash_surface:
             try:
@@ -331,8 +344,11 @@ class VoiceTools:
             wid = res.get("workspace_id")
             if name and name.strip() and wid:
                 await self.client.acall("workspace.rename", {"workspace_id": wid, "title": name.strip()})
+            if wid:
+                await self.client.acall("workspace.select", {"workspace_id": wid})
         except CmuxError as e:
             return self._fail(f"I couldn't create a workspace: {e}")
+        await self._land_in(None)  # the new workspace's terminal is now the focused one
         return await self._done(f"Created workspace {name.strip()}." if name and name.strip() else "Created a new workspace.", workspace_id=wid)
 
     async def rename_workspace(self, title: str, target: Optional[str] = None) -> Dict[str, Any]:
@@ -382,9 +398,11 @@ class VoiceTools:
                     params["url"] = _normalize_url(url)
                 res = await self.client.acall("browser.open_split", params) or {}
                 sid = res.get("surface_id")
+                await self._land_in(sid, keyboard=False)
                 return await self._done(f"Opened a browser {d}.", flash_surface=sid, surface_id=sid)
             res = await self.client.acall("surface.split", {"direction": d, "type": "terminal", "focus": True}) or {}
             sid = res.get("surface_id")
+            await self._land_in(sid)
             return await self._done(f"Split {d}.", flash_surface=sid, surface_id=sid)
         except CmuxError as e:
             return self._fail(f"I couldn't split: {e}")
@@ -399,6 +417,7 @@ class VoiceTools:
         except CmuxError as e:
             return self._fail(f"I couldn't open a new tab: {e}")
         sid = res.get("surface_id")
+        await self._land_in(sid, keyboard=params["type"] == "terminal")
         return await self._done("Opened a new browser tab." if params["type"] == "browser" else "Opened a new terminal tab.", flash_surface=sid, surface_id=sid)
 
     async def close_tab(self, target: Optional[str] = None) -> Dict[str, Any]:
@@ -1067,8 +1086,10 @@ class VoiceTools:
             res = await self.client.acall("workspace.create", {"focus": True, "working_directory": path}) or {}
             if res.get("workspace_id"):
                 await self.client.acall("workspace.rename", {"workspace_id": res["workspace_id"], "title": title})
+                await self.client.acall("workspace.select", {"workspace_id": res["workspace_id"]})
         except CmuxError as e:
             return self._fail(f"Created the worktree, but I couldn't open a workspace for it: {e}")
+        await self._land_in(None)
         say = f"{'Created' if created else 'Opened the existing'} worktree {name} in a new workspace."
         if open_claude:
             await asyncio.sleep(1.2)  # let the new terminal's shell start
@@ -1221,7 +1242,7 @@ class VoiceTools:
             await self._push_semantic()
             return self._fail(f"I couldn't send that to {self.semantic.agent_label}: {e}")
         await self._push_semantic("sent")
-        return await self._done("Sent.", flash_surface=surface_id, sent=True, typed=text, reply="Say only: Sent.")
+        return await self._done("Sent.", flash_surface=surface_id, sent=True, typed=text, reply="Say nothing; the box emptying is the confirmation.")
 
     async def semantic_clear(self) -> Dict[str, Any]:
         """Discard the box (the user wants to start over)."""
@@ -1229,7 +1250,7 @@ class VoiceTools:
             return self._fail(self._SEMANTIC_OFF)
         self.semantic.clear()
         await self._push_semantic("cleared")
-        return {"ok": True, "say": "Cleared.", "stage": self.semantic.stage, "reply": "Say only: Cleared."}
+        return {"ok": True, "say": "Cleared.", "stage": self.semantic.stage, "reply": "Say nothing."}
 
     # ------------------------------------------------------------- registry
 
