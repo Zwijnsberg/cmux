@@ -30,6 +30,13 @@ from typing import Any, Dict, Optional
 
 from loguru import logger
 
+# TLS must be configured before anything imports pipecat (and with it aiohttp,
+# which snapshots the CA bundle at import time). Keep this above the other
+# cmux_voice imports: ultravox_service pulls pipecat in at module load.
+from cmux_voice.tls import configure_tls_certificates as _configure_tls_certificates
+
+_configure_tls_certificates()
+
 from cmux_voice.cmux_client import CmuxClient, CmuxError
 from cmux_voice import shell_context
 from cmux_voice.completion_flow import CompletionFlow
@@ -43,19 +50,8 @@ from cmux_voice.ultravox_service import UrgentTextFrame
 
 
 def configure_tls_certificates() -> None:
-    """Point Python's TLS at certifi's CA bundle when the interpreter has none.
-
-    python.org macOS builds do not install root certificates, so aiohttp,
-    websockets, and nltk all fail with CERTIFICATE_VERIFY_FAILED. Setting
-    SSL_CERT_FILE / REQUESTS_CA_BUNDLE (only if unset) fixes every client.
-    """
-    try:
-        import certifi
-    except ImportError:
-        return
-    bundle = certifi.where()
-    for var in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"):
-        os.environ.setdefault(var, bundle)
+    """See ``cmux_voice.tls``; kept here for callers and tests that import it from bot."""
+    _configure_tls_certificates()
 
 
 def load_dotenv_if_present() -> None:

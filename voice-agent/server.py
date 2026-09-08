@@ -40,7 +40,13 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from loguru import logger
 
-from bot import configure_tls_certificates, load_dotenv_if_present, run_bot
+# Before bot/pipecat/aiohttp are imported: aiohttp fixes its default CA bundle at
+# import time, so SSL_CERT_FILE has to point at certifi already (see cmux_voice/tls.py).
+from cmux_voice.tls import configure_tls_certificates  # noqa: I001
+
+configure_tls_certificates()
+
+from bot import load_dotenv_if_present, run_bot  # noqa: E402
 
 PROTOCOL_VERSION = 1
 HERE = Path(__file__).resolve().parent
@@ -202,7 +208,7 @@ async def _run_bot_logged(transport, *, session: Optional[str] = None) -> None:
 
 def main() -> None:
     load_dotenv_if_present()
-    configure_tls_certificates()
+    configure_tls_certificates()  # idempotent; .env may have supplied a bundle path
     parser = argparse.ArgumentParser(description="cmux voice agent sidecar")
     parser.add_argument("--port", type=int, default=int(os.environ.get("CMUX_VOICE_AGENT_PORT", "0") or 0))
     parser.add_argument("--host", default="127.0.0.1")
