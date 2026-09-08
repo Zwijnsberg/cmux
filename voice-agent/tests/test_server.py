@@ -168,3 +168,34 @@ def test_reply_hints_cover_every_outcome():
     assert "answer it from the output" in bot.with_reply_hint("run_shell", {"ok": True, "say": "Ran ls.", "output": "a.txt"})["reply"]
     # A handler that already says how to reply (summaries) is left alone.
     assert bot.with_reply_hint("summarize_agent", {"ok": True, "say": "…", "reply": "Summarize this."})["reply"] == "Summarize this."
+
+
+def test_importing_server_leaves_aiohttp_trusting_certifi_cas():
+    """Regression: the sidecar configured SSL_CERT_FILE inside main(), after
+    `import bot` had already loaded pipecat and aiohttp. aiohttp builds its
+    default SSL context at import time, so on a python.org interpreter (no
+    system CA bundle) that context trusted zero CAs and every Ultravox call
+    failed with "Failed to connect to Ultravox". Importing `server` must leave
+    aiohttp's verified context populated even when the environment has no CA
+    variables at all.
+    """
+    import subprocess
+    import sys
+
+    env = {k: v for k, v in os.environ.items() if k not in {"SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR"}}
+    env["CMUX_VOICE_AGENT_TOKEN"] = "test-token"
+    code = (
+        "import server, aiohttp.connector as c;"
+        "print(c._SSL_CONTEXT_VERIFIED.cert_store_stats()['x509'])"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    trusted = int(result.stdout.strip().splitlines()[-1])
+    assert trusted > 0, "aiohttp's default SSL context trusts no CAs: TLS setup ran after aiohttp was imported"
