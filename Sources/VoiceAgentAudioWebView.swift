@@ -87,14 +87,24 @@ struct VoiceAgentAudioWebView: NSViewRepresentable {
         }
 
         func requestRecap(surfaceID: String?) {
-            let literal: String
-            if let surfaceID, let data = try? JSONSerialization.data(withJSONObject: [surfaceID]),
-               let json = String(data: data, encoding: .utf8) {
-                literal = String(json.dropFirst().dropLast())  // the quoted string
-            } else {
-                literal = "null"
+            evaluate("window.cmuxVoice && window.cmuxVoice.recap(\(Self.jsLiteral(surfaceID)))")
+        }
+
+        func setSemanticMode(surfaceID: String?, agent: String?) {
+            evaluate("window.cmuxVoice && window.cmuxVoice.semanticMode(\(Self.jsLiteral(surfaceID)), \(Self.jsLiteral(agent)))")
+        }
+
+        func semanticCommand(_ command: VoiceSemanticCommand, surfaceID: String) {
+            evaluate("window.cmuxVoice && window.cmuxVoice.semanticCommand(\(Self.jsLiteral(command.rawValue)), \(Self.jsLiteral(surfaceID)))")
+        }
+
+        /// A JSON string literal (or `null`) safe to splice into a script.
+        static func jsLiteral(_ value: String?) -> String {
+            guard let value, let data = try? JSONSerialization.data(withJSONObject: [value]),
+                  let json = String(data: data, encoding: .utf8) else {
+                return "null"
             }
-            evaluate("window.cmuxVoice && window.cmuxVoice.recap(\(literal))")
+            return String(json.dropFirst().dropLast())  // the quoted string
         }
 
         private func evaluate(_ script: String) {

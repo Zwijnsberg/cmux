@@ -3047,6 +3047,8 @@
 		C0DEB01C000000000000000B /* VoiceAgentSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DEB01C000000000000000C /* VoiceAgentSidebarView.swift */; };
 		C0DEB01C000000000000000D /* VoiceAgentSidecar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DEB01C000000000000000E /* VoiceAgentSidecar.swift */; };
 		C0DEB01C0000000000000101 /* VoiceAgentSidecarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DEB01C0000000000000102 /* VoiceAgentSidecarTests.swift */; };
+		C0DEB05E0000000000000001 /* VoiceSemanticModeOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DEB05E0000000000000002 /* VoiceSemanticModeOverlay.swift */; };
+		C0DEB05E0000000000000101 /* VoiceSemanticModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DEB05E0000000000000102 /* VoiceSemanticModeTests.swift */; };
 		A10020000000000000000019 /* WebSurfaceSelectionEvaluationOwner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002000000000000000001A /* WebSurfaceSelectionEvaluationOwner.swift */; };
 		A10020000000000000000011 /* WebSurfaceSelectionReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10020000000000000000012 /* WebSurfaceSelectionReader.swift */; };
 		A500120C /* WindowAccessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001222 /* WindowAccessor.swift */; };
@@ -6293,6 +6295,8 @@ B8B056D80000000000000002 /* MobileHostIdentityTests.swift */ = {isa = PBXFileRef
 		C0DEB01C000000000000000C /* VoiceAgentSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "VoiceAgentSidebarView.swift"; sourceTree = "<group>"; };
 		C0DEB01C000000000000000E /* VoiceAgentSidecar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "VoiceAgentSidecar.swift"; sourceTree = "<group>"; };
 		C0DEB01C0000000000000102 /* VoiceAgentSidecarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgentSidecarTests.swift; sourceTree = "<group>"; };
+		C0DEB05E0000000000000002 /* VoiceSemanticModeOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSemanticModeOverlay.swift; sourceTree = "<group>"; };
+		C0DEB05E0000000000000102 /* VoiceSemanticModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSemanticModeTests.swift; sourceTree = "<group>"; };
 		A1002000000000000000001A /* WebSurfaceSelectionEvaluationOwner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/WebSurfaceSelectionEvaluationOwner.swift; sourceTree = "<group>"; };
 		A10020000000000000000012 /* WebSurfaceSelectionReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/WebSurfaceSelectionReader.swift; sourceTree = "<group>"; };
 		A5001222 /* WindowAccessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowAccessor.swift; sourceTree = "<group>"; };
@@ -8116,6 +8120,7 @@ B8B056D80000000000000002 /* MobileHostIdentityTests.swift */ = {isa = PBXFileRef
 				C0DEB01C0000000000000008 /* VoiceAgentFeature.swift */,
 				C0DEB01C000000000000000A /* VoiceAgentSessionState.swift */,
 				C0DEB01C000000000000000C /* VoiceAgentSidebarView.swift */,
+				C0DEB05E0000000000000002 /* VoiceSemanticModeOverlay.swift */,
 				C0DEB01C000000000000000E /* VoiceAgentSidecar.swift */,
 				C0DE71A00000000000000002 /* AgentChatThemeSync.swift */,
 				992300019923000199230007 /* AgentChatTranscriptResumeIntentRecorder.swift */,
@@ -9828,6 +9833,7 @@ B8B056D80000000000000002 /* MobileHostIdentityTests.swift */ = {isa = PBXFileRef
 				0673572C53588696D70F32A9 /* BackgroundPrimeStartableSurfaceTests.swift */,
 				C0DE4300000000000000000A /* CmuxAgentChatConfigTests.swift */,
 				C0DEB01C0000000000000102 /* VoiceAgentSidecarTests.swift */,
+				C0DEB05E0000000000000102 /* VoiceSemanticModeTests.swift */,
 				C1A2B3C4D5E6F70800000002 /* CmuxConfigTests.swift */,
 				B1E0B1E0000000000000001E /* TerminalBlueprintLayoutTests.swift */,
 				B1E0B1E00000000000000020 /* TerminalBlueprintStateTests.swift */,
@@ -12453,6 +12459,7 @@ B8B056D80000000000000002 /* MobileHostIdentityTests.swift */ = {isa = PBXFileRef
 				C0DEB01C0000000000000009 /* VoiceAgentSessionState.swift in Sources */,
 				C0DEB01C000000000000000B /* VoiceAgentSidebarView.swift in Sources */,
 				C0DEB01C000000000000000D /* VoiceAgentSidecar.swift in Sources */,
+				C0DEB05E0000000000000001 /* VoiceSemanticModeOverlay.swift in Sources */,
 				A10020000000000000000019 /* WebSurfaceSelectionEvaluationOwner.swift in Sources */,
 				A10020000000000000000011 /* WebSurfaceSelectionReader.swift in Sources */,
 				A500120C /* WindowAccessor.swift in Sources */,
@@ -13622,6 +13629,7 @@ B8B056D80000000000000002 /* MobileHostIdentityTests.swift */ = {isa = PBXFileRef
 				ABE558B281D671A6DDDDD066 /* VMTunnelManagerTests.swift in Sources */,
 				F6AAAA235B7F431E8D1D2E94 /* VMTunnelStalenessTests.swift in Sources */,
 				C0DEB01C0000000000000101 /* VoiceAgentSidecarTests.swift in Sources */,
+				C0DEB05E0000000000000101 /* VoiceSemanticModeTests.swift in Sources */,
 				063BC42CEE257D6213A2E30C /* WindowAndDragTests.swift in Sources */,
 				A59170000000000000000001 /* WindowAppearanceSnapshotPaneBackgroundTests.swift in Sources */,
 				F4200000A1B2C3D4E5F60718 /* WindowAppearanceSnapshotTests.swift in Sources */,

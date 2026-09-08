@@ -109,6 +109,45 @@ extension AppDelegate {
         return true
     }
 
+    /// The "Semantic mode" button hovering on every terminal (and the palette
+    /// command for the focused one): turns the spoken-brainstorm mode on for
+    /// that terminal, or off if it was on there. Turning it on starts a voice
+    /// session when none is live; the sidecar is told once the call listens.
+    @discardableResult
+    func performVoiceSemanticModeToggle(surfaceID: UUID, preferredWindow: NSWindow? = nil) -> Bool {
+        guard VoiceAgentFeature.isEnabled() else {
+            NSSound.beep()
+            return false
+        }
+        let state = VoiceAgentSessionState.shared
+        if state.isSemanticModeOn(for: surfaceID) {
+            state.disableSemanticMode()
+            return true
+        }
+        let needsSession = state.enableSemanticMode(surfaceID: surfaceID)
+        if needsSession {
+            _ = focusRightSidebarInActiveMainWindow(mode: .voice, focusFirstItem: false, preferredWindow: preferredWindow)
+            startVoiceAgentSession()
+        }
+        return true
+    }
+
+    /// Palette route: semantic mode for the focused terminal of the active window.
+    @discardableResult
+    func performVoiceSemanticModeToggleForFocusedTerminal(preferredWindow: NSWindow? = nil) -> Bool {
+        guard let context = preferredRegisteredMainWindowContext(preferredWindow: preferredWindow),
+              let panel = context.tabManager.selectedWorkspace?.focusedTerminalPanel else {
+            NSSound.beep()
+            return false
+        }
+        return performVoiceSemanticModeToggle(surfaceID: panel.id, preferredWindow: preferredWindow)
+    }
+
+    /// Send / Clear on the hovering semantic box. Same path as saying "send it".
+    func performVoiceSemanticCommand(_ command: VoiceSemanticCommand) {
+        VoiceAgentSessionState.shared.sendSemanticCommand(command)
+    }
+
     func stopVoiceAgentSession() {
         let state = VoiceAgentSessionState.shared
         state.audioController?.stop()

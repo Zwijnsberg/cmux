@@ -293058,7 +293058,22 @@
     "blueprint.bubble.helpUpdated": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Open Blueprint (updated by agent)"}},"ja":{"stringUnit":{"state":"translated","value":"Blueprint を開く（エージェントが更新）"}}}},
     "blueprint.bubble.helpClose": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Close Blueprint"}},"ja":{"stringUnit":{"state":"translated","value":"Blueprint を閉じる"}}}},
     "blueprint.menu.resetSize": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Reset Size"}},"ja":{"stringUnit":{"state":"translated","value":"サイズをリセット"}}}},
-    "blueprint.header.resize": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Drag to resize the blueprint"}},"ja":{"stringUnit":{"state":"translated","value":"ドラッグして Blueprint のサイズを変更"}}}}
+    "blueprint.header.resize": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Drag to resize the blueprint"}},"ja":{"stringUnit":{"state":"translated","value":"ドラッグして Blueprint のサイズを変更"}}}},
+    "command.toggleVoiceSemanticMode.title": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Toggle Semantic Mode"}}}},
+    "command.toggleVoiceSemanticMode.subtitle": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Think out loud; the voice agent shapes one prompt for Claude Code or Codex in the focused terminal"}}}},
+    "voiceSemantic.button.title": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Semantic mode"}}}},
+    "voiceSemantic.button.help.on": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Turn off semantic mode"}}}},
+    "voiceSemantic.button.help.off": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Turn on semantic mode: think out loud and the voice agent shapes one prompt for Claude Code or Codex here"}}}},
+    "voiceSemantic.button.state.on": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"On"}}}},
+    "voiceSemantic.button.state.off": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Off"}}}},
+    "voiceSemantic.stage.idle": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Listening"}}}},
+    "voiceSemantic.stage.drafting": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Drafting"}}}},
+    "voiceSemantic.stage.final": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Ready to send?"}}}},
+    "voiceSemantic.placeholder.connecting": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Connecting the voice agent…"}}}},
+    "voiceSemantic.placeholder.idle": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Speak your idea. The box fills in as you talk and is rewritten when you change your mind."}}}},
+    "voiceSemantic.action.send": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Send"}}}},
+    "voiceSemantic.action.clear": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Clear"}}}},
+    "voiceSemantic.accessibility.box": {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Semantic mode draft"}}}}
   },
   "version": "1.0"
 }

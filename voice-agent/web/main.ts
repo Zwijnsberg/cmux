@@ -20,7 +20,14 @@ type Outbound =
 declare global {
   interface Window {
     webkit?: { messageHandlers?: { cmuxVoice?: { postMessage: (m: Outbound) => void } } };
-    cmuxVoice?: { start: () => void; stop: () => void; setMuted: (muted: boolean) => void; recap: (surfaceId: string | null) => void };
+    cmuxVoice?: {
+      start: () => void;
+      stop: () => void;
+      setMuted: (muted: boolean) => void;
+      recap: (surfaceId: string | null) => void;
+      semanticMode: (surfaceId: string | null, agent: string | null) => void;
+      semanticCommand: (command: string, surfaceId: string) => void;
+    };
   }
 }
 
@@ -232,7 +239,43 @@ async function recap(surfaceId: string | null): Promise<void> {
   }
 }
 
-window.cmuxVoice = { start: () => void start(), stop: () => void stop(), setMuted, recap: (id: string | null) => void recap(id) };
+/** The Semantic mode button on a terminal: on for `surfaceId` (with the agent detected there), or off (null). */
+async function semanticMode(surfaceId: string | null, agent: string | null): Promise<void> {
+  if (!client) return;
+  try {
+    const res = (await client.sendClientRequest(
+      "semantic_mode",
+      { surface_id: surfaceId, agent, enabled: surfaceId != null },
+      15000,
+    )) as any;
+    if (res && res.ok === false) post({ type: "error", message: res.error ?? "Semantic mode failed." });
+  } catch (e: any) {
+    post({ type: "error", message: `Semantic mode failed: ${describeError(e)}` });
+  }
+}
+
+/** Send / Clear pressed on the hovering semantic box. */
+async function semanticCommand(command: string, surfaceId: string): Promise<void> {
+  if (!client) {
+    post({ type: "error", message: "Start a voice session first." });
+    return;
+  }
+  try {
+    const res = (await client.sendClientRequest("semantic_command", { command, surface_id: surfaceId }, 15000)) as any;
+    if (res && res.ok === false) post({ type: "error", message: res.error ?? `Semantic ${command} failed.` });
+  } catch (e: any) {
+    post({ type: "error", message: `Semantic ${command} failed: ${describeError(e)}` });
+  }
+}
+
+window.cmuxVoice = {
+  start: () => void start(),
+  stop: () => void stop(),
+  setMuted,
+  recap: (id: string | null) => void recap(id),
+  semanticMode: (id: string | null, agent: string | null) => void semanticMode(id, agent),
+  semanticCommand: (command: string, id: string) => void semanticCommand(command, id),
+};
 
 if (new URLSearchParams(location.search).get("autostart") === "1") {
   void start();

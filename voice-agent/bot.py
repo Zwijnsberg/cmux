@@ -127,10 +127,21 @@ def with_reply_hint(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def build_tools(on_state=None, on_end_session=None, on_summarize=None) -> VoiceTools:
+def build_tools(on_state=None, on_end_session=None, on_summarize=None, on_semantic=None) -> VoiceTools:
     client = CmuxClient(allowed_methods=ALLOWED_METHODS)
     policy = ConfirmationPolicy(trust_terminal_input=os.environ.get("CMUX_VOICE_TRUST_TERMINAL") == "1")
-    return VoiceTools(client, policy, on_state=on_state, on_end_session=on_end_session, on_summarize=on_summarize)
+    return VoiceTools(
+        client, policy, on_state=on_state, on_end_session=on_end_session, on_summarize=on_summarize, on_semantic=on_semantic
+    )
+
+
+def semantic_command_notice(command: str, result: Dict[str, Any]) -> str:
+    """What the model is told after the user pressed a button on the hovering
+    box (Send or Clear) instead of speaking."""
+    if result.get("ok"):
+        said = "sent to the agent and the box is empty again" if command == "send" else "cleared the box"
+        return f'[Semantic mode: the user pressed {command.capitalize()} on the box; it {said}. Say exactly: "{result.get("say") or "Done."}"]'
+    return f"[Semantic mode: the user pressed {command.capitalize()} on the box, but it failed. Say in a few words: {result.get('say')}]"
 
 
 def build_llm(tools: VoiceTools, *, output_medium: Optional[str] = None, ui_summary: str = "", session: Optional[str] = None):
@@ -222,7 +233,14 @@ async def run_bot(transport, *, session: Optional[str] = None) -> None:
             return {"ok": False, "say": "Summaries are turned off for this session."}
         return await flow.summarize(target)
 
-    tools = build_tools(on_state=on_state, on_end_session=on_end_session, on_summarize=on_summarize)
+    async def on_semantic(snapshot: Dict[str, Any]) -> None:
+        # The hovering box in the app mirrors this state (text, stage, events).
+        try:
+            await rtvi.send_server_message(snapshot)
+        except Exception:  # noqa: BLE001
+            pass
+
+    tools = build_tools(on_state=on_state, on_end_session=on_end_session, on_summarize=on_summarize, on_semantic=on_semantic)
     asyncio.get_running_loop().run_in_executor(None, shell_context.build_directory_index)
 
     ui_summary = ""
@@ -267,7 +285,38 @@ async def run_bot(transport, *, session: Optional[str] = None) -> None:
     async def on_client_message(rtvi_proc, message):
         # The app's Recap button (per-terminal) asks for a spoken summary of one surface.
         data = getattr(message, "data", None) or {}
-        if getattr(message, "type", "") == "recap":
+        kind = getattr(message, "type", "")
+        if kind == "semantic_mode":
+            # The Semantic mode button on a terminal: on (with the detected
+            # agent) or off. The model learns about it through a system notice
+            # and confirms in one short sentence.
+            data = data if isinstance(data, dict) else {}
+            enabled = bool(data.get("enabled", True)) and bool(data.get("surface_id"))
+            agent = data.get("agent")
+            if enabled and tools.semantic.targets(data.get("surface_id")):
+                # Same terminal, re-detected agent: no announcement needed.
+                await tools.set_semantic_agent(agent)
+                await rtvi_proc.send_server_response(message, {"ok": True})
+                return
+            notice = await tools.set_semantic_mode(data.get("surface_id"), agent, enabled=enabled)
+            await rtvi_proc.send_server_response(message, {"ok": True})
+            await task.queue_frames([UrgentTextFrame(text=notice, urgency="soon")])
+            return
+        if kind == "semantic_command":
+            # Send / Clear pressed on the hovering box.
+            data = data if isinstance(data, dict) else {}
+            command = str(data.get("command") or "")
+            if command == "send":
+                result = await tools.semantic_send()
+            elif command == "clear":
+                result = await tools.semantic_clear()
+            else:
+                await rtvi_proc.send_server_response(message, {"ok": False, "error": f"Unknown semantic command {command!r}."})
+                return
+            await rtvi_proc.send_server_response(message, {"ok": bool(result.get("ok")), "error": None if result.get("ok") else result.get("say")})
+            await task.queue_frames([UrgentTextFrame(text=semantic_command_notice(command, result), urgency="soon")])
+            return
+        if kind == "recap":
             surface_id = data.get("surface_id") if isinstance(data, dict) else None
             briefing = await summarizer.briefing_for_surface(surface_id, source="manual")
             if briefing is None:

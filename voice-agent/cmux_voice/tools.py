@@ -19,6 +19,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from .cmux_client import CmuxClient, CmuxError
 from . import shell_context as shellctx
 from .policy import ConfirmationPolicy
+from .semantic import STAGE_FINAL, SemanticSession
 from .state import Pane, Surface, UIState, Workspace
 
 Handler = Callable[..., Awaitable[Dict[str, Any]]]
@@ -104,6 +105,7 @@ class VoiceTools:
         on_state: Optional[Callable[[UIState], Awaitable[None]]] = None,
         on_end_session: Optional[Callable[[], Awaitable[None]]] = None,
         on_summarize: Optional[Callable[[Optional[str]], Awaitable[Dict[str, Any]]]] = None,
+        on_semantic: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
     ) -> None:
         self.client = client
         self.policy = policy or ConfirmationPolicy()
@@ -112,6 +114,11 @@ class VoiceTools:
         self._on_end_session = on_end_session
         # Provided by bot.py (CompletionFlow.summarize); reads the finished terminal.
         self._on_summarize = on_summarize
+        # Semantic mode: the hovering brainstorm box over a coding agent's input.
+        # Every change is pushed to the app through `on_semantic` (bot.py sends
+        # it as a `semantic_draft` server message).
+        self.semantic = SemanticSession()
+        self._on_semantic = on_semantic
         # While on, everything the user says is typed into the terminal verbatim.
         self.dictation_active = False
         self._last_typed_surface: Optional[str] = None
@@ -751,6 +758,11 @@ class VoiceTools:
         s = await self._terminal(target)
         if isinstance(s, dict):
             return s
+        if self.semantic.targets(s.id):
+            # In semantic mode nothing reaches the agent until the user approves
+            # the send: a prompt the model composed becomes the consolidated
+            # draft instead.
+            return await self.semantic_finalize(text)
         body = text.strip()
         try:
             await self._submit(s.id, body)
@@ -1138,6 +1150,87 @@ class VoiceTools:
             await self._on_end_session()
         return {"ok": True, "say": "Goodbye.", "status": "ending"}
 
+    # ------------------------------------------------------- semantic mode
+
+    async def _push_semantic(self, event: Optional[str] = None) -> None:
+        if self._on_semantic is not None:
+            try:
+                await self._on_semantic(self.semantic.snapshot(event))
+            except Exception:  # noqa: BLE001
+                pass
+
+    async def set_semantic_mode(self, surface_id: Optional[str], agent: Optional[str] = None, enabled: bool = True) -> str:
+        """The app's Semantic mode button. Returns the system notice for the model."""
+        if enabled and surface_id:
+            notice = self.semantic.enable(surface_id, agent)
+            await self._push_semantic("enabled")
+            return notice
+        notice = self.semantic.disable()
+        await self._push_semantic("disabled")
+        return notice
+
+    async def set_semantic_agent(self, agent: Optional[str]) -> None:
+        """The app re-detected which agent runs in the semantic terminal."""
+        self.semantic.set_agent(agent)
+        await self._push_semantic()
+
+    _SEMANTIC_OFF = "Semantic mode is off. Turn it on with the Semantic mode button on a terminal first."
+    _SEMANTIC_QUIET = "Say nothing, unless something the user said is unclear or contradicts the rest; then ask one short question."
+
+    async def semantic_draft(self, text: str) -> Dict[str, Any]:
+        """Replace the hovering box with the whole idea so far."""
+        if not self.semantic.active:
+            return self._fail(self._SEMANTIC_OFF)
+        self.semantic.replace(text or "")
+        await self._push_semantic()
+        return {"ok": True, "say": "", "stage": self.semantic.stage, "text": self.semantic.text, "reply": self._SEMANTIC_QUIET}
+
+    async def semantic_finalize(self, text: str) -> Dict[str, Any]:
+        """The consolidated prompt replaces the box; the model then asks whether to send."""
+        if not self.semantic.active:
+            return self._fail(self._SEMANTIC_OFF)
+        if not text or not text.strip():
+            return self._fail("There is nothing to consolidate yet.")
+        self.semantic.finalize(text)
+        await self._push_semantic()
+        return {
+            "ok": True,
+            "say": "Is this ready to send?",
+            "stage": self.semantic.stage,
+            "text": self.semantic.text,
+            "reply": 'Ask exactly: "Is this ready to send?" and wait. Yes means semantic_send; anything else means keep drafting.',
+        }
+
+    async def semantic_send(self) -> Dict[str, Any]:
+        """Type the box into the agent's input, press enter, and empty the box."""
+        if not self.semantic.active:
+            return self._fail(self._SEMANTIC_OFF)
+        if not self.semantic.text.strip():
+            return self._fail("The box is empty; there is nothing to send yet.")
+        surface_id = self.semantic.surface_id or ""
+        was_final = self.semantic.stage == STAGE_FINAL
+        text = self.semantic.take_for_send()
+        try:
+            await self._submit(surface_id, text)
+        except CmuxError as e:
+            # Put the text back so nothing the user said is lost.
+            if was_final:
+                self.semantic.finalize(text)
+            else:
+                self.semantic.replace(text)
+            await self._push_semantic()
+            return self._fail(f"I couldn't send that to {self.semantic.agent_label}: {e}")
+        await self._push_semantic("sent")
+        return await self._done("Sent.", flash_surface=surface_id, sent=True, typed=text, reply="Say only: Sent.")
+
+    async def semantic_clear(self) -> Dict[str, Any]:
+        """Discard the box (the user wants to start over)."""
+        if not self.semantic.active:
+            return self._fail(self._SEMANTIC_OFF)
+        self.semantic.clear()
+        await self._push_semantic("cleared")
+        return {"ok": True, "say": "Cleared.", "stage": self.semantic.stage, "reply": "Say only: Cleared."}
+
     # ------------------------------------------------------------- registry
 
     def specs(self) -> List[ToolSpec]:
@@ -1193,6 +1286,10 @@ class VoiceTools:
             ToolSpec("confirm", "Pass on the user's answer to a pending confirmation question.", {"decision": {"type": "string", "enum": ["yes", "no"], "description": "The user's answer."}}, self.confirm, required=["decision"]),
             ToolSpec("summarize_agent", "Read the terminal where a coding agent just finished so you can summarize it aloud. Call when the user answers yes to 'Terminal X is done. Would you like a summary?', or asks what Claude/Codex did. Default: the most recently finished terminal, else the focused one.", {"target": {"type": "string", "description": "Optional terminal, tab, or workspace name the user said."}}, self.summarize_agent),
             ToolSpec("end_session", "End the voice session when the user says stop, goodbye, or that they are done.", {}, self.end_session),
+            ToolSpec("semantic_draft", "Semantic mode only. Replace the hovering brainstorm box with the user's WHOLE idea so far, rewritten as clear structured text (short lines, their technical details kept, filler removed). Call after each thing they say about the prompt; pass the complete current idea, never a delta.", {"text": {"type": "string", "description": "The complete current idea, restructured. Replaces the box."}}, self.semantic_draft, required=["text"]),
+            ToolSpec("semantic_finalize", "Semantic mode only. When the idea sounds complete (they trail off, say that's it, or answered your questions), replace the box with the consolidated prompt for the agent, then ask 'Is this ready to send?'.", {"text": {"type": "string", "description": "The final, clean instruction for the coding agent that captures everything the user decided."}}, self.semantic_finalize, required=["text"]),
+            ToolSpec("semantic_send", "Semantic mode only. The user approved ('yes', 'send it', 'go'): type the box into the agent's input, press enter, and empty the box.", {}, self.semantic_send),
+            ToolSpec("semantic_clear", "Semantic mode only. Discard the box when the user says scrap that, start over, or never mind.", {}, self.semantic_clear),
         ]
 
 
