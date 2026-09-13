@@ -59,7 +59,7 @@ struct TerminalBlueprintLayoutTests {
     @Test("degenerate pane sizes give an empty frame")
     func degenerateContainer() {
         #expect(TerminalBlueprintLayout.fitted.popupFrame(in: .zero) == .zero)
-        #expect(TerminalBlueprintLayout.enlarged.popupFrame(in: CGSize(width: .nan, height: 10)) == .zero)
+        #expect(TerminalBlueprintLayout.enlarged.popupFrame(in: CGSize(width: CGFloat.nan, height: 10)) == .zero)
     }
 
     @Test("a dragged size round-trips through fractions of the same pane")
