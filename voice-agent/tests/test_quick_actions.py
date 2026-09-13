@@ -85,6 +85,50 @@ async def test_rename_focus_and_new_workspace_in_group(gtools: VoiceTools, fake:
     assert {"method": "workspace.rename", "params": {"workspace_id": "WS-G", "title": "Invoices"}} in fake.requests
 
 
+async def test_move_workspace_between_groups_and_out(gtools: VoiceTools, fake: FakeCmux):
+    """"Put web frontend in Client Work": one add call. "Take api out of its
+    group": one remove call. Neither touches the workspaces themselves."""
+    res = await gtools.move_workspace_to_group("client work", workspace="web frontend")
+    assert res["ok"] and res["say"] == "Moved web frontend into Client Work."
+    assert {"method": "workspace.group.add", "params": {"group_id": "G1", "workspace_id": "WS-B"}} in fake.requests
+    res = await gtools.move_workspace_to_group("clients")  # no workspace named: the current one (WS-B)
+    assert res["ok"] and res["workspace_id"] == "WS-B" and res["group_id"] == "G1"
+    res = await gtools.move_workspace_to_group("side projects", workspace="api")
+    assert res["ok"] and {"method": "workspace.group.add", "params": {"group_id": "G2", "workspace_id": "WS-A"}} in fake.requests
+    res = await gtools.remove_workspace_from_group("api")
+    assert res["ok"] and res["say"] == "Took api out of Client Work."
+    assert {"method": "workspace.group.remove", "params": {"group_id": "G1", "workspace_id": "WS-A"}} in fake.requests
+    assert not any(r["method"] in {"workspace.close", "workspace.create"} for r in fake.requests)
+    res = await gtools.move_workspace_to_group("nope", workspace="api")
+    assert res["ok"] is False and "Client Work, Side Projects" in res["say"]
+    res = await gtools.move_workspace_to_group("clients", workspace="zzz")
+    assert res["ok"] is False and "could not find a workspace" in res["say"]
+
+
+async def test_delete_group_confirms_and_keeps_workspaces(gtools: VoiceTools, fake: FakeCmux):
+    res = await gtools.delete_workspace_group("side projects")
+    assert res["status"] == "needs_confirmation" and "Side Projects" in res["say"] and "stay open" in res["say"]
+    assert "workspace.group.delete" not in fake.methods()
+    res = await gtools.confirm("yes")
+    assert res["ok"] and {"method": "workspace.group.delete", "params": {"group_id": "G2", "close_workspaces": False}} in fake.requests
+    assert "workspace.close" not in fake.methods()
+
+
+async def test_state_summary_lists_groups_and_marks_worktrees(gtools: VoiceTools, fake: FakeCmux):
+    base = fake.responder
+
+    def responder(m, p):
+        if m == "workspace.list":
+            return {"workspaces": [{"id": "WS-A", "current_directory": "/repo/.claude/worktrees/feature-x"}, {"id": "WS-B", "current_directory": "/repo"}]}
+        return base(m, p)
+
+    fake.responder = responder
+    st = await gtools.refresh()
+    text = st.summary()
+    assert '1 "api" [worktree]' in text and '2 "web frontend" (current)' in text and "[worktree] (current)" not in text
+    assert 'Groups (2): "Client Work" [api] | "Side Projects" [web frontend]' in text
+
+
 # -------------------------------------------------------- naming things
 
 
@@ -160,6 +204,40 @@ async def test_create_worktree_creates_branch_dir_and_workspace(tools: VoiceTool
     assert res["ok"] and "existing" in res["say"]
 
 
+async def test_remove_worktree_removes_the_folder_not_a_workspace(tools: VoiceTools, fake: FakeCmux, tmp_path, monkeypatch):
+    """"Delete the worktree feature-x" must never turn into close_workspace on
+    some other workspace: it removes the git worktree folder (after a yes) and
+    closes only a workspace that was showing that folder."""
+    if subprocess.run(["git", "--version"], capture_output=True).returncode != 0:
+        pytest.skip("git not available")
+    repo = tmp_path / "proj"; repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    (repo / "a.txt").write_text("a")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"], check=True)
+    monkeypatch.setattr(sc, "shell_context", lambda tty, fallback_cwd=None: sc.ShellContext(cwd=str(repo), git_branch="main", git_root=str(repo)))
+    assert (await tools.create_worktree("feature-x"))["ok"]
+    path = repo / ".claude" / "worktrees" / "feature-x"
+    listed = await tools.list_worktrees()
+    assert listed["ok"] and [w["branch"] for w in listed["worktrees"]] == ["feature-x"]
+    # The workspace showing the worktree (WS-A in the fake) is the only one that may close.
+    base = fake.responder
+    fake.responder = lambda m, p: {"workspaces": [{"id": "WS-A", "current_directory": str(path)}, {"id": "WS-B", "current_directory": str(repo)}]} if m == "workspace.list" else base(m, p)
+    fake.requests.clear()
+    res = await tools.remove_worktree("feature x")
+    assert res["status"] == "needs_confirmation" and "feature-x" in res["say"] and "workspace api" in res["say"]
+    assert path.is_dir() and "workspace.close" not in fake.methods()
+    res = await tools.confirm("yes")
+    assert res["ok"], res
+    assert not path.exists()
+    assert [r["params"] for r in fake.requests if r["method"] == "workspace.close"] == [{"workspace_id": "WS-A"}]
+    branches = subprocess.run(["git", "-C", str(repo), "branch"], capture_output=True, text=True).stdout
+    assert "feature-x" in branches  # the branch survives
+    res = await tools.remove_worktree("feature-x")
+    assert res["ok"] is False and "no worktree called" in res["say"]
+    assert (await tools.list_worktrees())["worktrees"] == []
+
+
 async def test_create_worktree_outside_repo_explains(tools: VoiceTools, monkeypatch):
     monkeypatch.setattr(sc, "shell_context", lambda tty, fallback_cwd=None: sc.ShellContext(cwd="/tmp", git_branch=None, git_root=None))
     res = await tools.create_worktree("x")
@@ -204,18 +282,20 @@ def _stop(surface="S-B2", seq=5):
                                        "workspace_id": "WS-B", "surface_id": surface, "payload": {"hook_event_name": "Stop", "phase": "completed"}})
 
 
-async def test_callout_names_the_terminal_and_offers_a_summary(fake: FakeCmux):
+async def test_callout_names_the_terminal_and_offers_nothing_else(fake: FakeCmux):
     """Workspace "web frontend" has two terminals, so the name combines
-    workspace and tab; workspace "api" has one, so its name alone is used."""
+    workspace and tab; workspace "api" has one, so its name alone is used.
+    The sentence ends there: no summary offer, no question."""
     s = CompletionSummarizer(CmuxClient(fake.path))
     c = _stop("S-B2")
     text = await s.callout_for(c)
-    assert '"Terminal web frontend npm run dev is done. Would you like a summary?"' in text
-    assert "Interrupt whatever you were saying" in text and "summarize_agent" in text
+    assert '"Terminal web frontend npm run dev has completed its work."' in text
+    assert "Interrupt whatever you were saying" in text and "no question, no offer, no tools" in text
+    assert "Would you like" not in text and "summarize terminal web frontend npm run dev" in text
     assert list(s.pending) == ["S-B2"]  # remembered until the user asks
     single = AgentCompletion.from_frame({"type": "event", "category": "agent", "name": "agent.hook.Stop", "seq": 6, "source": "codex",
                                          "workspace_id": "WS-A", "surface_id": "S-A1", "payload": {"hook_event_name": "Stop", "phase": "completed"}})
-    assert '"Terminal api is done. Would you like a summary?"' in await s.callout_for(single)
+    assert '"Terminal api has completed its work."' in await s.callout_for(single)
     # "yes" takes the newest; a name picks that one; nothing left afterwards.
     assert s.take_by_name(None).completion is single
     assert s.take_by_name("the web frontend one").completion is c
@@ -274,9 +354,9 @@ async def test_completion_flow_calls_out_every_finish_and_summarizes_only_on_req
 
     flow = CompletionFlow(tools, CompletionSummarizer(CmuxClient(fake.path)), speak, settle_s=0)
     await flow.on_agent_completion(_stop("S-B1", seq=1))  # the focused terminal: still only a callout
-    assert flow.spoken == ["callout"] and "Terminal web frontend vim is done. Would you like a summary?" in spoken[-1]
+    assert flow.spoken == ["callout"] and "Terminal web frontend vim has completed its work." in spoken[-1]
     await flow.on_agent_completion(_stop("S-B2", seq=2))  # another terminal, same treatment
-    assert flow.spoken == ["callout", "callout"] and "Terminal web frontend npm run dev is done" in spoken[-1]
+    assert flow.spoken == ["callout", "callout"] and "Terminal web frontend npm run dev has completed its work." in spoken[-1]
     assert reads == []  # nothing was read or summarized on its own
     # Switching there does not play anything.
     await flow.on_ui_event({"name": "surface.focused", "category": "surface", "surface_id": "S-B2", "workspace_id": "WS-B"})

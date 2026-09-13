@@ -35,12 +35,16 @@ CLI or the command palette would.
 | "Open Claude Code" / "start Codex and tell it to add tests for login" | Launches the agent CLI in the terminal, no confirmation; a first prompt is typed and sent in the same breath |
 | "Enter" / "send it" | Submits whatever you dictated into the focused input (dictation is the only thing that waits for this) |
 | "New group called Clients" / "rename this group to Work" / "switch to group Clients" / "new workspace in Clients called Invoices" | Workspace groups (`workspace.group.*`) |
+| "Put API in Clients" / "move this workspace to Side Projects" / "take API out of its group" / "delete group Clients" | `move_workspace_to_group`, `remove_workspace_from_group`, `delete_workspace_group` (asks first; the workspaces stay open) |
+| "Make four terminals" / "split into two by two" | `arrange_terminals`: one call builds the grid (2, 3, 4, or 6) and lands in the top-left one |
+| "Prompt Claude in the top-left terminal" / "open Claude in the bottom right one" | Positions (`top-left`, `top-right`, `bottom-left`, `bottom-right`, `left`, `right`, `top`, `bottom`) name exactly one terminal |
+| "Remove the worktree feature-x" / "which worktrees are there" | `remove_worktree` (asks first; deletes the folder, keeps the branch, closes only a workspace that was showing that folder) / `list_worktrees` |
 | "New workspace called API" / "rename this workspace to API" | Created, then named via `workspace.rename` |
 | "Split right and call it server" / "call this tab logs" | `surface.rename` (new socket method) |
 | "Switch to API" / "go to the logs tab" | Name lookup is cached and refreshed from cmux's event stream, so switching is a single instant call; matching ignores case, dashes, and filler words |
 | "Check out develop" / "make a branch called fix-login" / "merge develop" / "commit this as fix login" / "push" / "pull" / "what changed" | `git_action` composes the exact command; confirms unless trusted input is on |
 | "Create a worktree for feature-x and open Claude there" | `git worktree add` under `<repo>/.claude/worktrees/`, a new named workspace in it, optionally Claude Code |
-| (an agent finishes in any terminal, focused or not) | It interrupts whatever it was saying with "Terminal X is done. Would you like a summary?" Say "yes" for the summary and a suggested next prompt; say nothing to carry on |
+| (an agent finishes in any terminal, focused or not) | It interrupts whatever it was saying with "Terminal X has completed its work." and nothing more |
 | "Yes" / "summarize this terminal" / "what did Claude do" | `summarize_agent`: reads the finished terminal (the newest one, or the one you name) and summarizes it |
 | **Semantic mode** button on a terminal (top right) | Think out loud; the agent keeps a hovering box over Claude Code's or Codex's input current with your idea, asks when something is unclear, consolidates it, and asks "Is this ready to send?" before anything is typed (see below) |
 | "Goodbye" | Ends the session |
@@ -50,25 +54,55 @@ unless **Run Commands Without Confirmation** is on.
 
 ## How it talks
 
-It is hands-free and quiet. The first session opens with "Hi there, what
-should we build?"; if you turn the microphone off and on again while the chat
-log is still on screen it just says "Hey." (the **Clear** button in the Voice
-panel makes the next start a first session again).
+Its whole vocabulary is four things. The first session opens with "Hi."; if
+you turn the microphone off and on again while the chat log is still on
+screen it says "Hello." (the **Clear** button in the Voice panel makes the
+next start a first session again). After that:
 
-After that it speaks only when spoken to:
+- "Done." after any action: a terminal opened or split, a workspace opened,
+  a prompt sent to an agent. No preamble, no readback, no next steps.
+- "Terminal X has completed its work." when an agent finishes anywhere.
+- A summary, only when you say "summarize terminal X".
+- A short answer, only when you ask a direct question ("what do I have open").
 
-- An action ("split right", "go to the API workspace", "tell it to add tests")
-  is done the moment it is recognized, silently. It does not say "Done" or
-  confirm in any way; what changed on screen is the confirmation.
-  There is no preamble, no readback, and no offer of next steps.
-- A question ("what do I have open", "which branch is this", "list the files")
-  gets a one- or two-sentence answer from the tool result.
-- If you pause mid-sentence it waits a little longer instead of guessing; the
-  turn delay is `CMUX_VOICE_TURN_DELAY` seconds (default 0.5) in the sidecar
-  environment.
-- Only genuinely ambiguous requests get a short question, and confirmation
-  questions for closing things or running commands (when trusted input is off)
-  are still read aloud and wait for yes or no.
+It still reads a confirmation question aloud before anything destructive
+(closing a tab, pane, or workspace, deleting a group, removing a worktree, and
+running commands when trusted input is off), and says one short sentence when
+something fails, so you know it did not happen. If you pause mid-sentence it
+waits a little longer instead of guessing; the turn delay is
+`CMUX_VOICE_TURN_DELAY` seconds (default 0.5) in the sidecar environment.
+
+## Worktrees, workspaces, groups
+
+These are three different things and the agent is told to keep them apart:
+
+- A **workspace** is a row in the sidebar (`create_workspace`, `close_workspace`).
+- A **worktree** is a git checkout folder on disk under
+  `<repo>/.claude/worktrees/<branch>` (`create_worktree`, `remove_worktree`,
+  `list_worktrees`). Creating one also opens a workspace named
+  "`<repo> · <branch>`", which `get_ui_state` marks `[worktree]`. Removing one
+  deletes the folder, keeps the branch, and closes only a workspace that was
+  showing that folder, after asking.
+- A **group** is a sidebar folder holding workspaces. "Put API in Clients"
+  moves a workspace between groups in one call.
+
+"Delete the worktree X" can only ever run `remove_worktree`; "close workspace
+X" can only ever run `close_workspace`. If it cannot tell which you said it
+asks "Worktree or workspace?".
+
+## Group actions
+
+"Make four terminals" is one `arrange_terminals` call that builds the grid and
+lands in the top-left terminal. A request applies to every terminal only when
+you say so in that request ("all", "each", "the four terminals"). The next
+request starts fresh: "prompt Claude in the top-left terminal" sends exactly
+one prompt to that terminal, even right after a group action. Positions
+(`top-left`, `bottom-right`, `left`, ...) always name one terminal.
+
+Splits are no longer refused by the voice agent for being "too narrow": the
+app decides, exactly as when you split by hand, and its answer is relayed.
+Opening an agent is refused only below 40 columns, where its input box cannot
+be drawn.
 
 ## Agents finishing
 
@@ -76,16 +110,17 @@ When a coding agent (Claude Code, Codex, OpenCode, or any agent with cmux
 hooks installed) finishes a turn in any terminal, focused or not, the voice
 agent interrupts whatever it was saying with:
 
-> "Terminal *name* is done. Would you like a summary?"
+> "Terminal *name* has completed its work."
 
 *name* is the workspace title; when that workspace holds more than one
 terminal it is the workspace title followed by the tab title ("Terminal Alpha
-server is done"). Say "yes" (or name the terminal, if several have finished)
-and it reads that terminal and summarizes it in under 100 words: what was
-completed, takeaways, warnings, and one suggested next step you could send
-back to the agent ("Next, you could tell it to …"). Say nothing, or "no", and
-it stays quiet. Set `CMUX_VOICE_SUMMARIES=0` in the sidecar environment to
-turn the callouts off.
+server has completed its work"). With Claude running in four terminals you
+hear that sentence four times, once per terminal, and nothing else. Say
+"summarize terminal *name*" and it reads that terminal and summarizes it in
+under 100 words: what was completed, takeaways, warnings, and one suggested
+next step you could send back to the agent ("Next, you could tell it to …").
+It never summarizes on its own. Set `CMUX_VOICE_SUMMARIES=0` in the sidecar
+environment to turn the callouts off.
 
 Each terminal's tab bar also has a **Recap** button (waveform icon, shown
 while the voice beta is on). Press it to hear a summary of that terminal on
@@ -203,9 +238,8 @@ WebRTC offer's `request_data`), which picks the greeting.
 | Panel shows Listening but you hear nothing; a speaker-off icon sits next to the phase | The page's audio element has not started | Click the mic off and on. If it persists, check the Mac's output device; the hidden page plays through the default output |
 | "Ultravox refused to start a call: the account's call allowance is used up" | Ultravox 402 | Add billing at ultravox.ai |
 | "Ultravox rejected the API key" | Wrong or revoked key | Settings › Beta Features › Voice Agent |
-| "This pane is only N columns wide" when asking to split | The pane cannot hold two usable terminals | Say "split down", or "close this pane" first |
 | Claude Code opens but ignores the first prompt | Its first-run "trust this folder" dialog | Handled automatically; if it still shows, say "option two" then "confirm" |
-| No "Terminal … is done" after a Claude turn | The agent ran outside a cmux terminal, or hooks are off | Run agents inside cmux; Codex/OpenCode need `cmux hooks setup` once |
+| No "Terminal … has completed its work" after a Claude turn | The agent ran outside a cmux terminal, or hooks are off | Run agents inside cmux; Codex/OpenCode need `cmux hooks setup` once |
 
 The sidecar log is at `~/Library/Logs/cmux/voice-agent-<bundle-id>.log`.
 Every voice session is one Ultravox call; end the session when you are not
