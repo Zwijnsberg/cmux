@@ -109,10 +109,11 @@ extension AppDelegate {
         return true
     }
 
-    /// The "Semantic mode" button hovering on every terminal (and the palette
-    /// command for the focused one): turns the spoken-brainstorm mode on for
-    /// that terminal, or off if it was on there. Turning it on starts a voice
-    /// session when none is live; the sidecar is told once the call listens.
+    /// The "Semantic mode" pill hovering on every terminal (and the palette
+    /// command for the focused one): on, the voice agent rewrites "tell it …"
+    /// prompts for that terminal into clean, structured prompts; off, they go
+    /// in verbatim. Turning it on starts a voice session when none is live;
+    /// the sidecar is told once the call listens.
     @discardableResult
     func performVoiceSemanticModeToggle(surfaceID: UUID, preferredWindow: NSWindow? = nil) -> Bool {
         guard VoiceAgentFeature.isEnabled() else {
@@ -141,11 +142,6 @@ extension AppDelegate {
             return false
         }
         return performVoiceSemanticModeToggle(surfaceID: panel.id, preferredWindow: preferredWindow)
-    }
-
-    /// Send / Clear on the hovering semantic box. Same path as saying "send it".
-    func performVoiceSemanticCommand(_ command: VoiceSemanticCommand) {
-        VoiceAgentSessionState.shared.sendSemanticCommand(command)
     }
 
     func stopVoiceAgentSession() {

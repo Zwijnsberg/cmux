@@ -90,12 +90,8 @@ struct VoiceAgentAudioWebView: NSViewRepresentable {
             evaluate("window.cmuxVoice && window.cmuxVoice.recap(\(Self.jsLiteral(surfaceID)))")
         }
 
-        func setSemanticMode(surfaceID: String?, agent: String?) {
-            evaluate("window.cmuxVoice && window.cmuxVoice.semanticMode(\(Self.jsLiteral(surfaceID)), \(Self.jsLiteral(agent)))")
-        }
-
-        func semanticCommand(_ command: VoiceSemanticCommand, surfaceID: String) {
-            evaluate("window.cmuxVoice && window.cmuxVoice.semanticCommand(\(Self.jsLiteral(command.rawValue)), \(Self.jsLiteral(surfaceID)))")
+        func setSemanticMode(surfaceID: String?) {
+            evaluate("window.cmuxVoice && window.cmuxVoice.semanticMode(\(Self.jsLiteral(surfaceID)))")
         }
 
         /// A JSON string literal (or `null`) safe to splice into a script.

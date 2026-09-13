@@ -30,6 +30,13 @@ from typing import Any, Dict, Optional
 
 from loguru import logger
 
+# TLS must be configured before anything imports pipecat (and with it aiohttp,
+# which snapshots the CA bundle at import time). Keep this above the other
+# cmux_voice imports: ultravox_service pulls pipecat in at module load.
+from cmux_voice.tls import configure_tls_certificates as _configure_tls_certificates
+
+_configure_tls_certificates()
+
 from cmux_voice.cmux_client import CmuxClient, CmuxError
 from cmux_voice import shell_context
 from cmux_voice.completion_flow import CompletionFlow
@@ -43,19 +50,8 @@ from cmux_voice.ultravox_service import UrgentTextFrame
 
 
 def configure_tls_certificates() -> None:
-    """Point Python's TLS at certifi's CA bundle when the interpreter has none.
-
-    python.org macOS builds do not install root certificates, so aiohttp,
-    websockets, and nltk all fail with CERTIFICATE_VERIFY_FAILED. Setting
-    SSL_CERT_FILE / REQUESTS_CA_BUNDLE (only if unset) fixes every client.
-    """
-    try:
-        import certifi
-    except ImportError:
-        return
-    bundle = certifi.where()
-    for var in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"):
-        os.environ.setdefault(var, bundle)
+    """See ``cmux_voice.tls``; kept here for callers and tests that import it from bot."""
+    _configure_tls_certificates()
 
 
 def load_dotenv_if_present() -> None:
@@ -103,8 +99,8 @@ def with_reply_hint(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
     """Attach an instruction for the spoken reply.
 
     Ultravox sees the tool result as data; the hint states what kind of reply
-    this outcome needs. Actions get exactly one word ("Done."); questions get
-    an answer; problems get a few words.
+    this outcome needs. Actions get silence (the result on screen is the
+    confirmation); questions get an answer; problems get a few words.
     """
     out = dict(result)
     if out.get("reply"):
@@ -121,9 +117,9 @@ def with_reply_hint(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
     elif tool_name in QUERY_TOOLS:
         out["reply"] = "Answer the user's question from this information in one or two short spoken sentences."
     elif tool_name in {"run_shell", "run_command"} and out.get("output"):
-        out["reply"] = "If the user asked a question, answer it from the output in one short sentence (read short lists, summarize long output). If they asked for an action, say only: Done."
+        out["reply"] = "If the user asked a question, answer it from the output in one short sentence (read short lists, summarize long output). If they asked for an action, say nothing at all."
     else:
-        out["reply"] = "Say only the word: Done. Nothing else."
+        out["reply"] = "Say nothing at all: no confirmation, no description of what happened. Respond with silence."
     return out
 
 
@@ -133,15 +129,6 @@ def build_tools(on_state=None, on_end_session=None, on_summarize=None, on_semant
     return VoiceTools(
         client, policy, on_state=on_state, on_end_session=on_end_session, on_summarize=on_summarize, on_semantic=on_semantic
     )
-
-
-def semantic_command_notice(command: str, result: Dict[str, Any]) -> str:
-    """What the model is told after the user pressed a button on the hovering
-    box (Send or Clear) instead of speaking."""
-    if result.get("ok"):
-        said = "sent to the agent and the box is empty again" if command == "send" else "cleared the box"
-        return f'[Semantic mode: the user pressed {command.capitalize()} on the box; it {said}. Say exactly: "{result.get("say") or "Done."}"]'
-    return f"[Semantic mode: the user pressed {command.capitalize()} on the box, but it failed. Say in a few words: {result.get('say')}]"
 
 
 def build_llm(tools: VoiceTools, *, output_medium: Optional[str] = None, ui_summary: str = "", session: Optional[str] = None):
@@ -234,7 +221,7 @@ async def run_bot(transport, *, session: Optional[str] = None) -> None:
         return await flow.summarize(target)
 
     async def on_semantic(snapshot: Dict[str, Any]) -> None:
-        # The hovering box in the app mirrors this state (text, stage, events).
+        # Lets the app confirm which terminal the sidecar has the mode on for.
         try:
             await rtvi.send_server_message(snapshot)
         except Exception:  # noqa: BLE001
@@ -287,34 +274,17 @@ async def run_bot(transport, *, session: Optional[str] = None) -> None:
         data = getattr(message, "data", None) or {}
         kind = getattr(message, "type", "")
         if kind == "semantic_mode":
-            # The Semantic mode button on a terminal: on (with the detected
-            # agent) or off. The model learns about it through a system notice
-            # and confirms in one short sentence.
+            # The Semantic mode pill on a terminal: on (rewrite prompts for that
+            # terminal) or off (verbatim). The model learns about it through a
+            # system notice and confirms in one short sentence.
             data = data if isinstance(data, dict) else {}
             enabled = bool(data.get("enabled", True)) and bool(data.get("surface_id"))
-            agent = data.get("agent")
             if enabled and tools.semantic.targets(data.get("surface_id")):
-                # Same terminal, re-detected agent: no announcement needed.
-                await tools.set_semantic_agent(agent)
                 await rtvi_proc.send_server_response(message, {"ok": True})
                 return
-            notice = await tools.set_semantic_mode(data.get("surface_id"), agent, enabled=enabled)
+            notice = await tools.set_semantic_mode(data.get("surface_id"), enabled=enabled)
             await rtvi_proc.send_server_response(message, {"ok": True})
             await task.queue_frames([UrgentTextFrame(text=notice, urgency="soon")])
-            return
-        if kind == "semantic_command":
-            # Send / Clear pressed on the hovering box.
-            data = data if isinstance(data, dict) else {}
-            command = str(data.get("command") or "")
-            if command == "send":
-                result = await tools.semantic_send()
-            elif command == "clear":
-                result = await tools.semantic_clear()
-            else:
-                await rtvi_proc.send_server_response(message, {"ok": False, "error": f"Unknown semantic command {command!r}."})
-                return
-            await rtvi_proc.send_server_response(message, {"ok": bool(result.get("ok")), "error": None if result.get("ok") else result.get("say")})
-            await task.queue_frames([UrgentTextFrame(text=semantic_command_notice(command, result), urgency="soon")])
             return
         if kind == "recap":
             surface_id = data.get("surface_id") if isinstance(data, dict) else None

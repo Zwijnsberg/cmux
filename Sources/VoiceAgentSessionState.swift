@@ -7,35 +7,9 @@ protocol VoiceAgentAudioControlling: AnyObject {
     func setMuted(_ muted: Bool)
     func stop()
     func requestRecap(surfaceID: String?)
-    /// Semantic mode on for one terminal (`surfaceID` non-nil, with the coding
-    /// agent detected there) or off (`nil`).
-    func setSemanticMode(surfaceID: String?, agent: String?)
-    /// Send or Clear pressed on the hovering semantic box.
-    func semanticCommand(_ command: VoiceSemanticCommand, surfaceID: String)
-}
-
-/// Buttons on the hovering semantic box. Every entrypoint (box button, voice)
-/// ends in the sidecar's `semantic_send` / `semantic_clear` tools.
-enum VoiceSemanticCommand: String {
-    case send
-    case clear
-}
-
-/// What the hovering semantic box shows for the terminal in semantic mode.
-struct VoiceSemanticDraft: Equatable {
-    enum Stage: String {
-        /// Box is empty; the agent is listening for the idea.
-        case idle
-        /// A partial idea, restructured by the agent as the user talks.
-        case drafting
-        /// The consolidated prompt; the agent asked "Is this ready to send?".
-        case final
-    }
-
-    var text: String
-    var stage: Stage
-    /// Set for one update when the sidecar reports a transition ("sent", "cleared").
-    var event: String?
+    /// Semantic mode on for one terminal (`surfaceID` non-nil: the sidecar
+    /// rewrites prompts for it) or off (`nil`: prompts go in verbatim).
+    func setSemanticMode(surfaceID: String?)
 }
 
 /// Single source of truth for the voice session as shown by the right-sidebar
@@ -87,14 +61,9 @@ final class VoiceAgentSessionState {
     var isAudioPlaying = false
     /// A recap the user asked for before the session was live; sent once it is.
     var pendingRecapSurfaceID: String??
-    /// The one terminal whose Semantic mode button is on (nil = off everywhere).
-    /// One at a time: the spoken brainstorm is about a single prompt.
+    /// The one terminal whose Semantic mode pill is on (nil = off everywhere).
+    /// One at a time: it tells the sidecar which terminal gets rewritten prompts.
     private(set) var semanticSurfaceID: UUID?
-    /// The hovering box contents for `semanticSurfaceID`, as last reported by the sidecar.
-    private(set) var semanticDraft = VoiceSemanticDraft(text: "", stage: .idle, event: nil)
-    /// Coding agent detected in each terminal that had semantic mode on
-    /// (`claude` / `codex`), reported by the terminal overlays.
-    private(set) var semanticAgentBySurface: [UUID: String] = [:]
     /// Semantic mode was turned on before the call was live; announced once it is.
     private(set) var pendingSemanticSurfaceID: UUID?
     /// True while the audio page should be mounted (from start until stop).
@@ -149,8 +118,7 @@ final class VoiceAgentSessionState {
         isSessionRequested = false
         isMuted = false
         finalizeOpenTranscriptLines()
-        // The brainstorm lives in the call; without a call the glowing button
-        // and its box would be stale.
+        // The mode lives in the call; without a call the glowing pill would be stale.
         clearSemanticMode()
     }
 
@@ -183,8 +151,8 @@ final class VoiceAgentSessionState {
                 if let summary = data["summary"] as? String {
                     uiSummary = summary
                 }
-            case "semantic_draft":
-                handleSemanticDraft(data)
+            case "semantic_mode":
+                handleSemanticModeReport(data)
             default:
                 break
             }
@@ -216,7 +184,7 @@ final class VoiceAgentSessionState {
                 // Semantic mode turned on before the call was live.
                 if !wasLive, let pending = pendingSemanticSurfaceID, pending == semanticSurfaceID {
                     pendingSemanticSurfaceID = nil
-                    audioController?.setSemanticMode(surfaceID: pending.uuidString, agent: semanticAgentBySurface[pending])
+                    audioController?.setSemanticMode(surfaceID: pending.uuidString)
                 }
             }
         case "thinking":
@@ -294,80 +262,36 @@ final class VoiceAgentSessionState {
     @discardableResult
     func enableSemanticMode(surfaceID: UUID) -> Bool {
         semanticSurfaceID = surfaceID
-        semanticDraft = VoiceSemanticDraft(text: "", stage: .idle, event: nil)
         if isLive, let controller = audioController {
             pendingSemanticSurfaceID = nil
-            controller.setSemanticMode(surfaceID: surfaceID.uuidString, agent: semanticAgentBySurface[surfaceID])
+            controller.setSemanticMode(surfaceID: surfaceID.uuidString)
             return false
         }
         pendingSemanticSurfaceID = surfaceID
         return !isSessionRequested && phase != .starting
     }
 
-    /// Turns semantic mode off; the box is discarded on both sides.
+    /// Turns semantic mode off.
     func disableSemanticMode() {
         let wasOn = semanticSurfaceID != nil
         let wasPending = pendingSemanticSurfaceID != nil
         clearSemanticMode()
         if wasOn, !wasPending, isLive {
-            audioController?.setSemanticMode(surfaceID: nil, agent: nil)
+            audioController?.setSemanticMode(surfaceID: nil)
         }
-    }
-
-    /// The terminal overlay re-detected which coding agent (if any) runs in
-    /// `surfaceID`. Only `claude` and `codex` open the hovering box.
-    func updateSemanticAgent(surfaceID: UUID, agentID: String?) {
-        let previous = semanticAgentBySurface[surfaceID]
-        guard previous != agentID else { return }
-        if let agentID {
-            semanticAgentBySurface[surfaceID] = agentID
-        } else {
-            semanticAgentBySurface.removeValue(forKey: surfaceID)
-        }
-        // Keep the sidecar's phrasing ("Claude Code" / "Codex") current.
-        if semanticSurfaceID == surfaceID, pendingSemanticSurfaceID == nil, isLive, let agentID {
-            audioController?.setSemanticMode(surfaceID: surfaceID.uuidString, agent: agentID)
-        }
-    }
-
-    /// Whether the hovering box should show for `surfaceID`: semantic mode is
-    /// on there and Claude Code or Codex is the foreground program.
-    func showsSemanticPromptBox(for surfaceID: UUID) -> Bool {
-        isSemanticModeOn(for: surfaceID) && semanticAgentBySurface[surfaceID] != nil
-    }
-
-    func sendSemanticCommand(_ command: VoiceSemanticCommand) {
-        guard let surfaceID = semanticSurfaceID, isLive else { return }
-        audioController?.semanticCommand(command, surfaceID: surfaceID.uuidString)
     }
 
     private func clearSemanticMode() {
         semanticSurfaceID = nil
         pendingSemanticSurfaceID = nil
-        semanticDraft = VoiceSemanticDraft(text: "", stage: .idle, event: nil)
     }
 
-    private func handleSemanticDraft(_ data: [String: Any]) {
-        let enabled = data["enabled"] as? Bool ?? true
-        let reportedSurface = (data["surface_id"] as? String).flatMap(UUID.init(uuidString:))
-        guard let semanticSurfaceID else {
-            // The sidecar still has a box for a terminal we already turned off.
-            if enabled, reportedSurface != nil, isLive {
-                audioController?.setSemanticMode(surfaceID: nil, agent: nil)
-            }
-            return
-        }
-        guard enabled, reportedSurface == semanticSurfaceID else {
-            // "disabled", or a box for another terminal: the sidecar is
-            // behind an on/off flip here; our latest intent wins.
-            return
-        }
-        let stage = VoiceSemanticDraft.Stage(rawValue: data["stage"] as? String ?? "") ?? .idle
-        semanticDraft = VoiceSemanticDraft(
-            text: data["text"] as? String ?? "",
-            stage: stage,
-            event: data["event"] as? String
-        )
+    /// The sidecar reports which terminal it has the mode on for. If it still
+    /// has it on after we turned it off locally, our latest intent wins.
+    private func handleSemanticModeReport(_ data: [String: Any]) {
+        let enabled = data["enabled"] as? Bool ?? false
+        guard semanticSurfaceID == nil, enabled, data["surface_id"] as? String != nil, isLive else { return }
+        audioController?.setSemanticMode(surfaceID: nil)
     }
 
     private static func joined(_ existing: String, _ chunk: String) -> String {
