@@ -46,7 +46,7 @@ CLI or the command palette would.
 | "Create a worktree for feature-x and open Claude there" | `git worktree add` under `<repo>/.claude/worktrees/`, a new named workspace in it, optionally Claude Code |
 | (an agent finishes in any terminal, focused or not) | It interrupts whatever it was saying with "Terminal X has completed its work." and nothing more |
 | "Yes" / "summarize this terminal" / "what did Claude do" | `summarize_agent`: reads the finished terminal (the newest one, or the one you name) and summarizes it |
-| **Semantic mode** button on a terminal (top right) | Think out loud; the agent keeps a hovering box over Claude Code's or Codex's input current with your idea, asks when something is unclear, consolidates it, and asks "Is this ready to send?" before anything is typed (see below) |
+| **Semantic mode** pill on a terminal (top right) | On: "tell it …" is rewritten into a clean, structured prompt before it is sent. Off: sent as you said it (see below) |
 | "Goodbye" | Ends the session |
 
 Closing tabs or workspaces always asks first. Running a command asks first
@@ -137,40 +137,33 @@ no transcript files leave the machine.
 
 Every terminal has a small **Semantic mode** pill in its top-right corner
 (gray and faint when off, pink-purple when on; also **Toggle Semantic Mode** in
-the command palette for the focused terminal). Turn it on in a terminal where
-Claude Code or Codex is running and a pink box hovers over the agent's input.
-If no voice session is live, one is started first.
+the command palette for the focused terminal). It changes one thing: how the
+voice agent turns "tell it …" / "ask it …" into the prompt it types into
+Claude Code or Codex in that terminal.
 
-Then just talk. This is a conversation about one prompt, not dictation:
+- **Off** (the default): your words go in as you said them. Only the lead-in
+  ("tell it") and obvious filler are dropped; wording, order, and length stay.
+- **On**: the agent first rewrites your rough words into a clean, structured
+  prompt (grammar fixed, short sentences or bullets, every technical detail and
+  name kept, nothing added), then types and sends it. It takes a moment longer.
 
-- The box is a brainstorm, not a transcript. After each thing you say the agent
-  rewrites the box with the *whole* idea so far, restructured (short lines,
-  your technical details kept, filler removed). Every update replaces the box;
-  when you change your mind the affected part is rewritten, not appended.
-- It stays quiet while you think, and interrupts only to ask one short question
-  when something is unclear or contradictory ("The login page or the API?",
-  "Can you put that another way?").
-- When you sound done (you trail off, say "that's it", or have answered its
-  questions) it replaces the box with the consolidated prompt and asks exactly
-  **"Is this ready to send?"**
-- "Yes" / "send it" (or the **Send** button on the box) types the box into the
-  agent's input and presses Enter; the box empties, like the CLI's own input
-  field, ready for the next idea. "No" or more talking keeps drafting. "Scrap
-  that" / **Clear** discards the box.
+Either way the prompt is sent immediately and nothing is spoken afterwards.
+The mode is on for one terminal at a time (turning it on elsewhere moves it),
+and turning it on starts a voice session if none is live. Ending the session
+turns it off.
 
-Nothing reaches the terminal until you approve the send: while the mode is on,
-"tell it …" style requests become the draft instead of being typed. The mode
-is on for one terminal at a time (turning it on elsewhere moves it); the box
-only shows while Claude Code or Codex is the terminal's foreground program
-(other agents get the button but no box). Ending the voice session turns the
-mode off.
+Wiring: the pill sends `semantic_mode {surface_id}` to the sidecar through the
+audio page; the sidecar keeps a `SemanticSession`
+(`voice-agent/cmux_voice/semantic.py`) and tells the model how to compose
+through a system notice.
 
-Wiring: the button sends `semantic_mode {surface_id, agent}` to the sidecar
-through the audio page; the sidecar's `semantic_draft` / `semantic_finalize` /
-`semantic_send` / `semantic_clear` tools update a `SemanticSession`
-(`voice-agent/cmux_voice/semantic.py`) and every change comes back as a
-`semantic_draft` server message that the box renders. The **Send** and
-**Clear** buttons go through `semantic_command`, the same path as saying it.
+## Terminal names follow the prompts
+
+New terminals are not named up front. The first prompt the voice agent sends
+to Claude Code or Codex in a terminal names that terminal with a two-word
+topic ("Login Tests", "Deploy Script"), and when a later prompt moves to a
+different subject the terminal is renamed to the new topic. A name you gave
+yourself ("call this tab server") is never overwritten.
 
 ## Setup
 
@@ -212,9 +205,9 @@ Voice tab (SwiftUI) ── hidden 1×1 WKWebView ── WebRTC ──► voice-a
   the panel, the palette command, the menu item, and the shortcut.
 - `voice-agent/cmux_voice/tools.py` is the tool catalog; the socket methods it
   may call are allowlisted in `ALLOWED_METHODS`.
-- `Sources/VoiceSemanticModeOverlay.swift` is the Semantic mode pill and box,
-  hosted in the terminal's portal layer by `GhosttySurfaceScrollView`; the
-  mode's state lives in `VoiceAgentSessionState`.
+- `Sources/VoiceSemanticModeOverlay.swift` is the Semantic mode pill, hosted
+  in the terminal's portal layer by `GhosttySurfaceScrollView`; the mode's
+  state lives in `VoiceAgentSessionState`.
 - CLI: `cmux right-sidebar set voice` shows the panel.
 
 ## Environment the sidecar receives

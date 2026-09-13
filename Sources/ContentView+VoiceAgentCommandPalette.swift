@@ -14,8 +14,8 @@ extension ContentView {
             CommandPaletteCommandContribution(
                 commandId: "palette.toggleVoiceSemanticMode",
                 title: { _ in String(localized: "command.toggleVoiceSemanticMode.title", defaultValue: "Toggle Semantic Mode") },
-                subtitle: { _ in String(localized: "command.toggleVoiceSemanticMode.subtitle", defaultValue: "Think out loud; the voice agent shapes one prompt for Claude Code or Codex in the focused terminal") },
-                keywords: ["voice", "semantic", "brainstorm", "prompt", "dictate", "claude", "codex", "agent"]
+                subtitle: { _ in String(localized: "command.toggleVoiceSemanticMode.subtitle", defaultValue: "Rewrite spoken prompts for Claude Code or Codex in the focused terminal into clean, structured prompts") },
+                keywords: ["voice", "semantic", "rewrite", "prompt", "dictate", "claude", "codex", "agent"]
             ),
         ]
     }

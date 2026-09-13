@@ -279,7 +279,8 @@ struct GhosttyTerminalViewVisibilityPolicyTests {
             inactiveOverlayOpacity: 0,
             showsInactiveOverlay: false,
             searchState: nil,
-            dropZone: nil
+            dropZone: nil,
+            blueprint: nil
         )
         defer {
             coordinator.portalReconciliationScheduler.cancel()

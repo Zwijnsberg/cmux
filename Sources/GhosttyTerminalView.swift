@@ -9676,9 +9676,9 @@ final class GhosttySurfaceScrollView: NSView {
     private var blueprintOverlayView: TerminalBlueprintOverlayView?
     private let deferredBlueprintOverlayMutationScheduler = MainActorDeferredActionScheduler()
     private var blueprintOverlayMutationGeneration: UInt64 = 0
-    /// The voice agent's "Semantic mode" pill and hovering prompt box (see
-    /// `VoiceSemanticModeOverlay.swift`). Portal-hosted like the find bar so
-    /// they stay above the terminal; mounted below the find bar in z-order.
+    /// The voice agent's "Semantic mode" pill (see `VoiceSemanticModeOverlay.swift`).
+    /// Portal-hosted like the find bar so it stays above the terminal; mounted
+    /// below the find bar in z-order.
     private var voiceSemanticOverlay: VoiceSemanticOverlayController?
     private let deferredSearchOverlayMutationScheduler = MainActorDeferredActionScheduler()
     private let imageTransferIndicatorShowScheduler = MainActorDeferredActionScheduler()
@@ -10133,9 +10133,7 @@ final class GhosttySurfaceScrollView: NSView {
         linkHoverIndicatorView.autoresizingMask = [.width, .height]
         addSubview(linkHoverIndicatorView)
 
-        voiceSemanticOverlay = VoiceSemanticOverlayController(container: self) { [weak self] in
-            self?.surfaceView.terminalSurface?.foregroundProcessID()
-        }
+        voiceSemanticOverlay = VoiceSemanticOverlayController(container: self)
 
         scrollView.contentView.postsBoundsChangedNotifications = true
         observers.append(NotificationCenter.default.addObserver(
@@ -10476,7 +10474,7 @@ final class GhosttySurfaceScrollView: NSView {
                 overlay.layoutOverlay()
             }
         }
-        voiceSemanticOverlay?.layout(containerBounds: bounds, cellHeight: surfaceView.cellSize.height)
+        voiceSemanticOverlay?.layout()
         bringPaneDropTargetToFrontIfNeeded()
         // NSScrollView can defer clip-view/content-size updates until its own layout pass,
         // which makes interactive width changes arrive a queue turn late on Sequoia.

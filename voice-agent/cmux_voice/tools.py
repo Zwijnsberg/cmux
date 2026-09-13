@@ -19,7 +19,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from .cmux_client import CmuxClient, CmuxError
 from . import shell_context as shellctx
 from .policy import ConfirmationPolicy
-from .semantic import STAGE_FINAL, SemanticSession
+from .semantic import SemanticSession
 from .state import Pane, Surface, UIState, Workspace, is_positional
 
 Handler = Callable[..., Awaitable[Dict[str, Any]]]
@@ -116,11 +116,16 @@ class VoiceTools:
         self._on_end_session = on_end_session
         # Provided by bot.py (CompletionFlow.summarize); reads the finished terminal.
         self._on_summarize = on_summarize
-        # Semantic mode: the hovering brainstorm box over a coding agent's input.
-        # Every change is pushed to the app through `on_semantic` (bot.py sends
-        # it as a `semantic_draft` server message).
+        # Semantic mode: which terminal (if any) gets rewritten prompts.
         self.semantic = SemanticSession()
         self._on_semantic = on_semantic
+        # Terminal names set from prompt topics (surface id -> title). The first
+        # prompt names the terminal; a later prompt on a different topic renames
+        # it (see _name_for_topic). A name the user chose is pinned and never
+        # overwritten.
+        self._topic_titles: Dict[str, str] = {}
+        self._pinned_titles: set[str] = set()
+        self._awaiting_name: set[str] = set()
         # While on, everything the user says is typed into the terminal verbatim.
         self.dictation_active = False
         self._last_typed_surface: Optional[str] = None
@@ -843,26 +848,52 @@ class VoiceTools:
         await self.client.acall("surface.send_key", {"surface_id": surface_id, "key": "enter"})
         self._last_typed_surface = None
 
-    async def compose_and_type(self, text: str, target: Optional[str] = None) -> Dict[str, Any]:
-        """Type a message the model has already rewritten into the focused input
+    async def _name_for_topic(self, surface_id: str, topic: Optional[str]) -> Dict[str, Any]:
+        """Name the terminal after the prompt's two-word topic: on the first
+        prompt, and again whenever a later prompt is about a different topic.
+        A name the user chose themselves is pinned and never overwritten.
+        Returns extra result fields: `named` with the new title, or
+        `name_this_terminal` when the model forgot the topic on the first
+        prompt and has to call rename_tab itself."""
+        if surface_id in self._pinned_titles:
+            return {}
+        title = topic_title(topic)
+        current = self._topic_titles.get(surface_id)
+        if not title:
+            if current is not None:
+                return {}  # keep the name we have rather than asking again
+            self._awaiting_name.add(surface_id)
+            return {
+                "name_this_terminal": True,
+                "reply": "Now call rename_tab with a two-word summary of the topic of that prompt (Title Case, e.g. Login Tests), then say only: Done.",
+            }
+        if current is not None and current.lower() == title.lower():
+            return {}
+        try:
+            await self.client.acall("surface.rename", {"surface_id": surface_id, "title": title})
+        except CmuxError:
+            return {}
+        self._topic_titles[surface_id] = title
+        self._awaiting_name.discard(surface_id)
+        return {"named": title, "renamed": current is not None}
+
+    async def compose_and_type(self, text: str, target: Optional[str] = None, topic: Optional[str] = None) -> Dict[str, Any]:
+        """Type a message the model has already composed into the focused input
         (an agent CLI or the shell) and send it. Nobody has to say "enter": the
-        user asked for the prompt to go, so it goes."""
+        user asked for the prompt to go, so it goes. The first prompt into a
+        terminal names it after `topic`."""
         if not text or not text.strip():
             return self._fail("What should I write?")
         s = await self._terminal(target)
         if isinstance(s, dict):
             return s
-        if self.semantic.targets(s.id):
-            # In semantic mode nothing reaches the agent until the user approves
-            # the send: a prompt the model composed becomes the consolidated
-            # draft instead.
-            return await self.semantic_finalize(text)
         body = text.strip()
         try:
             await self._submit(s.id, body)
         except CmuxError as e:
             return self._fail(f"I couldn't send that: {e}")
-        return await self._done("Done.", flash_surface=s.id, typed=body, sent=True)
+        named = await self._name_for_topic(s.id, topic)
+        return await self._done("Done.", flash_surface=s.id, typed=body, sent=True, **named)
 
     async def press_enter(self, target: Optional[str] = None) -> Dict[str, Any]:
         """Submit whatever is in the focused input. Trust rule: like pressing Enter."""
@@ -951,7 +982,7 @@ class VoiceTools:
         return False
 
 
-    async def open_agent(self, agent: str = "claude", prompt: Optional[str] = None, target: Optional[str] = None) -> Dict[str, Any]:
+    async def open_agent(self, agent: str = "claude", prompt: Optional[str] = None, target: Optional[str] = None, topic: Optional[str] = None) -> Dict[str, Any]:
         """Launch a coding agent CLI in the terminal, optionally sending a first prompt.
 
         Launching is harmless, so it never asks. A first prompt is typed and
@@ -975,7 +1006,8 @@ class VoiceTools:
                     await self._submit(s.id, prompt.strip())
                 except CmuxError as e:
                     return self._fail(f"{label} is open, but I couldn't send the prompt: {e}")
-                return await self._done("Done.", flash_surface=s.id, agent=binary, typed=prompt.strip(), sent=True, already_open=True)
+                named = await self._name_for_topic(s.id, topic)
+                return await self._done("Done.", flash_surface=s.id, agent=binary, typed=prompt.strip(), sent=True, already_open=True, **named)
             return {"ok": True, "say": f"{label} is already open in this terminal.", "agent": binary, "already_open": True}
         try:
             await self.client.acall("surface.send_text", {"surface_id": s.id, "text": binary})
@@ -993,7 +1025,8 @@ class VoiceTools:
                 await self._submit(s.id, prompt.strip())
             except CmuxError as e:
                 return self._fail(f"Opened {label}, but couldn't send the prompt: {e}")
-            return await self._done("Done.", flash_surface=s.id, agent=binary, typed=prompt.strip(), sent=True)
+            named = await self._name_for_topic(s.id, topic)
+            return await self._done("Done.", flash_surface=s.id, agent=binary, typed=prompt.strip(), sent=True, **named)
         return await self._done("Done.", flash_surface=s.id, agent=binary)
 
     # ------------------------------------------------------ tools: workspace groups
@@ -1121,6 +1154,15 @@ class VoiceTools:
             await self.client.acall("surface.rename", {"surface_id": s.id, "title": title.strip()})
         except CmuxError as e:
             return self._fail(f"I couldn't rename the tab: {e}")
+        if s.id in self._awaiting_name:
+            # The model naming the terminal after its first prompt: a topic
+            # name, which later topic changes may replace.
+            self._awaiting_name.discard(s.id)
+            self._topic_titles[s.id] = title.strip()
+        else:
+            # The user chose this name; topic changes never overwrite it.
+            self._pinned_titles.add(s.id)
+            self._topic_titles.pop(s.id, None)
         return await self._done(f"Named the tab {title.strip()}.", flash_surface=s.id)
 
     # ------------------------------------------------------------ tools: git
@@ -1388,84 +1430,21 @@ class VoiceTools:
 
     # ------------------------------------------------------- semantic mode
 
-    async def _push_semantic(self, event: Optional[str] = None) -> None:
+    async def _push_semantic(self) -> None:
         if self._on_semantic is not None:
             try:
-                await self._on_semantic(self.semantic.snapshot(event))
+                await self._on_semantic(self.semantic.snapshot())
             except Exception:  # noqa: BLE001
                 pass
 
-    async def set_semantic_mode(self, surface_id: Optional[str], agent: Optional[str] = None, enabled: bool = True) -> str:
-        """The app's Semantic mode button. Returns the system notice for the model."""
+    async def set_semantic_mode(self, surface_id: Optional[str], enabled: bool = True) -> str:
+        """The app's Semantic mode pill. Returns the system notice for the model."""
         if enabled and surface_id:
-            notice = self.semantic.enable(surface_id, agent)
-            await self._push_semantic("enabled")
-            return notice
-        notice = self.semantic.disable()
-        await self._push_semantic("disabled")
+            notice = self.semantic.enable(surface_id)
+        else:
+            notice = self.semantic.disable()
+        await self._push_semantic()
         return notice
-
-    async def set_semantic_agent(self, agent: Optional[str]) -> None:
-        """The app re-detected which agent runs in the semantic terminal."""
-        self.semantic.set_agent(agent)
-        await self._push_semantic()
-
-    _SEMANTIC_OFF = "Semantic mode is off. Turn it on with the Semantic mode button on a terminal first."
-    _SEMANTIC_QUIET = "Say nothing, unless something the user said is unclear or contradicts the rest; then ask one short question."
-
-    async def semantic_draft(self, text: str) -> Dict[str, Any]:
-        """Replace the hovering box with the whole idea so far."""
-        if not self.semantic.active:
-            return self._fail(self._SEMANTIC_OFF)
-        self.semantic.replace(text or "")
-        await self._push_semantic()
-        return {"ok": True, "say": "", "stage": self.semantic.stage, "text": self.semantic.text, "reply": self._SEMANTIC_QUIET}
-
-    async def semantic_finalize(self, text: str) -> Dict[str, Any]:
-        """The consolidated prompt replaces the box; the model then asks whether to send."""
-        if not self.semantic.active:
-            return self._fail(self._SEMANTIC_OFF)
-        if not text or not text.strip():
-            return self._fail("There is nothing to consolidate yet.")
-        self.semantic.finalize(text)
-        await self._push_semantic()
-        return {
-            "ok": True,
-            "say": "Is this ready to send?",
-            "stage": self.semantic.stage,
-            "text": self.semantic.text,
-            "reply": 'Ask exactly: "Is this ready to send?" and wait. Yes means semantic_send; anything else means keep drafting.',
-        }
-
-    async def semantic_send(self) -> Dict[str, Any]:
-        """Type the box into the agent's input, press enter, and empty the box."""
-        if not self.semantic.active:
-            return self._fail(self._SEMANTIC_OFF)
-        if not self.semantic.text.strip():
-            return self._fail("The box is empty; there is nothing to send yet.")
-        surface_id = self.semantic.surface_id or ""
-        was_final = self.semantic.stage == STAGE_FINAL
-        text = self.semantic.take_for_send()
-        try:
-            await self._submit(surface_id, text)
-        except CmuxError as e:
-            # Put the text back so nothing the user said is lost.
-            if was_final:
-                self.semantic.finalize(text)
-            else:
-                self.semantic.replace(text)
-            await self._push_semantic()
-            return self._fail(f"I couldn't send that to {self.semantic.agent_label}: {e}")
-        await self._push_semantic("sent")
-        return await self._done("Sent.", flash_surface=surface_id, sent=True, typed=text, reply="Say nothing; the box emptying is the confirmation.")
-
-    async def semantic_clear(self) -> Dict[str, Any]:
-        """Discard the box (the user wants to start over)."""
-        if not self.semantic.active:
-            return self._fail(self._SEMANTIC_OFF)
-        self.semantic.clear()
-        await self._push_semantic("cleared")
-        return {"ok": True, "say": "Cleared.", "stage": self.semantic.stage, "reply": "Say nothing."}
 
     # ------------------------------------------------------------- registry
 
@@ -1507,9 +1486,9 @@ class VoiceTools:
             ToolSpec("shell_context", "Report the terminal's working directory and git branch. Call before composing a shell or git command when the answer depends on where the user is.", {"target": target_prop}, self.shell_context),
             ToolSpec("go_to_directory", "Change the terminal's directory to a folder the user names. Finds it by name (relative to the current directory, then by search) and runs cd. Ask only if several folders share the name.", {"name": {"type": "string", "description": "Folder name or path as spoken, e.g. 'staff portal', 'voice agent', 'src/lib'."}, "parent": {"type": "string", "description": "Optional parent folder name to disambiguate."}, "target": target_prop}, self.go_to_directory, required=["name"]),
             ToolSpec("run_shell", "Run a shell or git command that YOU composed from the user's intent, e.g. 'switch to develop' -> git checkout develop. Compose exact, correct syntax; call shell_context first if it depends on the current branch or directory. Requires confirmation unless trusted input is on.", {"command": {"type": "string", "description": "The exact command line."}, "target": target_prop}, self.run_shell, required=["command"]),
-            ToolSpec("compose_and_type", "Send a message YOU rewrote from the user's rough words to ONE input (the focused terminal, or the target such as 'top-left'), e.g. a Claude Code or Codex prompt: it is typed AND submitted with enter in one step. Use for 'tell it ...', 'ask it ...', 'have it ...', 'prompt ...'. Never ask the user to say enter. One call sends to one terminal only.", {"text": {"type": "string", "description": "The polished text to send."}, "target": target_prop}, self.compose_and_type, required=["text"]),
+            ToolSpec("compose_and_type", "Send a message to ONE input (the focused terminal, or the target such as 'top-left'), e.g. a Claude Code or Codex prompt: it is typed AND submitted with enter in one step. Use for 'tell it ...', 'ask it ...', 'have it ...', 'prompt ...'. Never ask the user to say enter. One call sends to one terminal only. Always pass topic: the first prompt into a terminal names that terminal after it.", {"text": {"type": "string", "description": "The text to send (verbatim, or rewritten when semantic mode is on)."}, "topic": {"type": "string", "description": "Exactly two words summarizing what the prompt is about, Title Case, e.g. 'Login Tests'. Always pass it; keep the same topic while the subject stays the same, pass a new one when the user moves to a different subject (the terminal is renamed)."}, "target": target_prop}, self.compose_and_type, required=["text", "topic"]),
             ToolSpec("press_enter", "Press enter to submit whatever is in the focused input, terminal or agent CLI. Use when the user says enter, send, submit, or go.", {"target": target_prop}, self.press_enter),
-            ToolSpec("open_agent", "Open a coding agent CLI (Claude Code by default; also Codex, OpenCode, Gemini, Pi) in the terminal. Optionally pass a first prompt YOU composed from the user's request; it is typed and sent in the same call. Never asks for confirmation.", {"agent": {"type": "string", "description": "claude (default), codex, opencode, gemini, or pi."}, "prompt": {"type": "string", "description": "Optional first prompt, already rewritten into a clear instruction."}, "target": target_prop}, self.open_agent),
+            ToolSpec("open_agent", "Open a coding agent CLI (Claude Code by default; also Codex, OpenCode, Gemini, Pi) in the terminal. Optionally pass a first prompt from the user's request; it is typed and sent in the same call and names the terminal after topic. Never asks for confirmation.", {"agent": {"type": "string", "description": "claude (default), codex, opencode, gemini, or pi."}, "prompt": {"type": "string", "description": "Optional first prompt (verbatim, or rewritten when semantic mode is on)."}, "topic": {"type": "string", "description": "With a prompt: exactly two words summarizing its topic, Title Case, e.g. 'Login Tests'."}, "target": target_prop}, self.open_agent),
             ToolSpec("create_workspace_group", "Create a named workspace group in the sidebar, optionally containing existing workspaces.", {"name": {"type": "string"}, "workspaces": {"type": "array", "items": {"type": "string"}, "description": "Existing workspace names to put in the group."}}, self.create_workspace_group, required=["name"]),
             ToolSpec("rename_workspace_group", "Rename a workspace group (default: the group containing the current workspace).", {"name": {"type": "string"}, "target": {"type": "string", "description": "Group name to rename."}}, self.rename_workspace_group, required=["name"]),
             ToolSpec("focus_workspace_group", "Switch to a workspace group by name (its first workspace).", {"target": {"type": "string"}}, self.focus_workspace_group, required=["target"]),
@@ -1528,11 +1507,17 @@ class VoiceTools:
             ToolSpec("confirm", "Pass on the user's answer to a pending confirmation question.", {"decision": {"type": "string", "enum": ["yes", "no"], "description": "The user's answer."}}, self.confirm, required=["decision"]),
             ToolSpec("summarize_agent", "Read a terminal where a coding agent ran so you can summarize it aloud. Call ONLY when the user says 'summarize terminal <name>' or 'summarize this terminal'. Default: the most recently finished terminal, else the focused one.", {"target": {"type": "string", "description": "The terminal, tab, or workspace name the user said, e.g. the <name> from 'Terminal <name> has completed its work.'"}}, self.summarize_agent),
             ToolSpec("end_session", "End the voice session when the user says stop, goodbye, or that they are done.", {}, self.end_session),
-            ToolSpec("semantic_draft", "Semantic mode only. Replace the hovering brainstorm box with the user's WHOLE idea so far, rewritten as clear structured text (short lines, their technical details kept, filler removed). Call after each thing they say about the prompt; pass the complete current idea, never a delta.", {"text": {"type": "string", "description": "The complete current idea, restructured. Replaces the box."}}, self.semantic_draft, required=["text"]),
-            ToolSpec("semantic_finalize", "Semantic mode only. When the idea sounds complete (they trail off, say that's it, or answered your questions), replace the box with the consolidated prompt for the agent, then ask 'Is this ready to send?'.", {"text": {"type": "string", "description": "The final, clean instruction for the coding agent that captures everything the user decided."}}, self.semantic_finalize, required=["text"]),
-            ToolSpec("semantic_send", "Semantic mode only. The user approved ('yes', 'send it', 'go'): type the box into the agent's input, press enter, and empty the box.", {}, self.semantic_send),
-            ToolSpec("semantic_clear", "Semantic mode only. Discard the box when the user says scrap that, start over, or never mind.", {}, self.semantic_clear),
         ]
+
+
+_TOPIC_WORD = re.compile(r"[A-Za-z0-9][A-Za-z0-9'’\-]*")
+
+
+def topic_title(topic: Optional[str]) -> str:
+    """A terminal name from the model's topic: exactly the first two words,
+    Title Case ("fix login bug" -> "Fix Login"); empty when nothing usable."""
+    words = _TOPIC_WORD.findall(topic or "")[:2]
+    return " ".join(w if w.isupper() and len(w) <= 4 else w[:1].upper() + w[1:] for w in words)
 
 
 _SHELL_PROMPT = re.compile(r"^\S+@\S+\s+\S+\s*[%$#]\s*$|^[%$#]\s*$|^\S+\s*[%$#]\s*$")

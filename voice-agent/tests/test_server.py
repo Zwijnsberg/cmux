@@ -133,7 +133,7 @@ def test_prompt_guards_composition_and_git_context():
     from cmux_voice.prompt import build_system_prompt
 
     prompt = build_system_prompt()
-    assert "do not add ideas" in prompt
+    assert "Add nothing they did not say" in prompt
     assert "not a git repository" in prompt
     assert "go_to_directory" in prompt and "run_shell" in prompt and "compose_and_type" in prompt
 
