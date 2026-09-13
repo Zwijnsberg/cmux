@@ -182,6 +182,18 @@ yourself ("call this tab server") is never overwritten.
    command palette, the View menu, or bind `toggleVoiceAgent` in Keyboard
    Shortcuts) and click the microphone. macOS asks for microphone access the
    first time.
+4. Or tap **⌘ and ⌥ together**, with no other key, from any app. The chord
+   starts the session if none is running and ends it otherwise, exactly like
+   the mic button, with a short click sound so you hear it register when cmux
+   is in the background. It is on by default under the voice beta
+   (**Settings › Beta Features › Command+Option Starts or Ends Voice**).
+   Working from other apps needs macOS Accessibility permission for cmux
+   (System Settings › Privacy & Security › Accessibility); cmux asks once when
+   the setting is on. Until it is granted the chord works only while cmux is
+   frontmost. A ⌘⌥ that is part of another shortcut (⌘⌥+Space) or joined by
+   another modifier never triggers it. The chord is modifier-only, so it is
+   not a `shortcuts.bindings` entry and is not rebindable; turn it off with the
+   setting if it gets in the way.
 
 Release builds need `voiceAgent.startCommand` set to the command that starts
 `voice-agent/server.py`; Debug builds find the checkout's `voice-agent/.venv`

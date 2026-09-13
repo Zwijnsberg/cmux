@@ -17,6 +17,7 @@ public struct BetaFeaturesSection: View {
     @State private var workspaceTodosChecklistStyle: DefaultsValueModel<WorkspaceTodoChecklistStyle>
     @State private var voiceAgent: DefaultsValueModel<Bool>
     @State private var voiceAgentTrustTerminalInput: DefaultsValueModel<Bool>
+    @State private var voiceAgentGlobalHotkey: DefaultsValueModel<Bool>
     @State private var voiceAgentApiKey: SecretValueModel
     @State private var voiceAgentApiKeyDraft = ""
     @State private var blueprint: DefaultsValueModel<Bool>
@@ -29,6 +30,7 @@ public struct BetaFeaturesSection: View {
     ) {
         _voiceAgent = State(initialValue: DefaultsValueModel(store: defaultsStore, key: catalog.betaFeatures.voiceAgent))
         _voiceAgentTrustTerminalInput = State(initialValue: DefaultsValueModel(store: defaultsStore, key: catalog.voiceAgent.trustTerminalInput))
+        _voiceAgentGlobalHotkey = State(initialValue: DefaultsValueModel(store: defaultsStore, key: catalog.voiceAgent.globalHotkey))
         _voiceAgentApiKey = State(initialValue: SecretValueModel(
             store: secretStore,
             key: catalog.voiceAgent.ultravoxApiKey,
@@ -75,6 +77,8 @@ public struct BetaFeaturesSection: View {
                     voiceAgentApiKeyRow
                     SettingsCardDivider()
                     voiceAgentTrustRow
+                    SettingsCardDivider()
+                    voiceAgentHotkeyRow
                 }
                 blueprintRow
             }
@@ -94,6 +98,7 @@ public struct BetaFeaturesSection: View {
             workspaceTodosChecklistStyle,
             voiceAgent,
             voiceAgentTrustTerminalInput,
+            voiceAgentGlobalHotkey,
             blueprint,
         ]
         models.forEach { $0.startObserving() }
@@ -174,6 +179,23 @@ public struct BetaFeaturesSection: View {
                 .labelsHidden()
                 .controlSize(.small)
                 .accessibilityIdentifier("SettingsBetaVoiceAgentTrustToggle")
+        }
+    }
+
+    @ViewBuilder
+    private var voiceAgentHotkeyRow: some View {
+        SettingsCardRow(
+            configurationReview: .settingsOnly,
+            searchAnchorID: "setting:betaFeatures:voice-agent-hotkey",
+            String(localized: "settings.betaFeatures.voiceAgent.globalHotkey", defaultValue: "Command+Option Starts or Ends Voice"),
+            subtitle: voiceAgentGlobalHotkey.current
+                ? String(localized: "settings.betaFeatures.voiceAgent.globalHotkey.subtitleOn", defaultValue: "Tap ⌘ and ⌥ together, with no other key, from any app. Working while cmux is in the background needs Accessibility permission (System Settings › Privacy & Security › Accessibility).")
+                : String(localized: "settings.betaFeatures.voiceAgent.globalHotkey.subtitleOff", defaultValue: "Turn this on to start or end the voice session by tapping ⌘ and ⌥ together, even when cmux is in the background.")
+        ) {
+            Toggle("", isOn: Binding(get: { voiceAgentGlobalHotkey.current }, set: { voiceAgentGlobalHotkey.set($0) }))
+                .labelsHidden()
+                .controlSize(.small)
+                .accessibilityIdentifier("SettingsBetaVoiceAgentHotkeyToggle")
         }
     }
 

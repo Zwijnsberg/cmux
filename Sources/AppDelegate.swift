@@ -1710,6 +1710,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             sentryStartMemoryContextRefresh()
         }
         SystemWideHotkeyController.shared.start()
+        VoiceAgentGlobalHotkeyController.shared.start()
         AgentHibernationController.shared.start()
         RendererRealizationController.shared.start()
         NSApp.servicesProvider = self

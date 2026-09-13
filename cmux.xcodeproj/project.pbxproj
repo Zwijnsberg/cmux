@@ -3043,6 +3043,8 @@
 		F6AAAA235B7F431E8D1D2E94 /* VMTunnelStalenessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E87BDCAB46A44D7596A4784D /* VMTunnelStalenessTests.swift */; };
 		C0DEB01C0000000000000005 /* VoiceAgentAudioWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DEB01C0000000000000006 /* VoiceAgentAudioWebView.swift */; };
 		C0DEB01C0000000000000007 /* VoiceAgentFeature.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DEB01C0000000000000008 /* VoiceAgentFeature.swift */; };
+		C0DEB01C0000000000000301 /* VoiceAgentGlobalHotkey.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DEB01C0000000000000302 /* VoiceAgentGlobalHotkey.swift */; };
+		C0DEB01C0000000000000303 /* VoiceAgentGlobalHotkeyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DEB01C0000000000000304 /* VoiceAgentGlobalHotkeyTests.swift */; };
 		C0DEB01C0000000000000009 /* VoiceAgentSessionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DEB01C000000000000000A /* VoiceAgentSessionState.swift */; };
 		C0DEB01C000000000000000B /* VoiceAgentSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DEB01C000000000000000C /* VoiceAgentSidebarView.swift */; };
 		C0DEB01C000000000000000D /* VoiceAgentSidecar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DEB01C000000000000000E /* VoiceAgentSidecar.swift */; };
@@ -6291,6 +6293,8 @@ B8B056D80000000000000002 /* MobileHostIdentityTests.swift */ = {isa = PBXFileRef
 		E87BDCAB46A44D7596A4784D /* VMTunnelStalenessTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VMTunnelStalenessTests.swift; sourceTree = "<group>"; };
 		C0DEB01C0000000000000006 /* VoiceAgentAudioWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "VoiceAgentAudioWebView.swift"; sourceTree = "<group>"; };
 		C0DEB01C0000000000000008 /* VoiceAgentFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "VoiceAgentFeature.swift"; sourceTree = "<group>"; };
+		C0DEB01C0000000000000302 /* VoiceAgentGlobalHotkey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "VoiceAgentGlobalHotkey.swift"; sourceTree = "<group>"; };
+		C0DEB01C0000000000000304 /* VoiceAgentGlobalHotkeyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgentGlobalHotkeyTests.swift; sourceTree = "<group>"; };
 		C0DEB01C000000000000000A /* VoiceAgentSessionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "VoiceAgentSessionState.swift"; sourceTree = "<group>"; };
 		C0DEB01C000000000000000C /* VoiceAgentSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "VoiceAgentSidebarView.swift"; sourceTree = "<group>"; };
 		C0DEB01C000000000000000E /* VoiceAgentSidecar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "VoiceAgentSidecar.swift"; sourceTree = "<group>"; };
@@ -8118,6 +8122,7 @@ B8B056D80000000000000002 /* MobileHostIdentityTests.swift */ = {isa = PBXFileRef
 				C0DEB01C0000000000000004 /* ContentView+VoiceAgentCommandPalette.swift */,
 				C0DEB01C0000000000000006 /* VoiceAgentAudioWebView.swift */,
 				C0DEB01C0000000000000008 /* VoiceAgentFeature.swift */,
+				C0DEB01C0000000000000302 /* VoiceAgentGlobalHotkey.swift */,
 				C0DEB01C000000000000000A /* VoiceAgentSessionState.swift */,
 				C0DEB01C000000000000000C /* VoiceAgentSidebarView.swift */,
 				C0DEB05E0000000000000002 /* VoiceSemanticModeOverlay.swift */,
@@ -9833,6 +9838,7 @@ B8B056D80000000000000002 /* MobileHostIdentityTests.swift */ = {isa = PBXFileRef
 				0673572C53588696D70F32A9 /* BackgroundPrimeStartableSurfaceTests.swift */,
 				C0DE4300000000000000000A /* CmuxAgentChatConfigTests.swift */,
 				C0DEB01C0000000000000102 /* VoiceAgentSidecarTests.swift */,
+				C0DEB01C0000000000000304 /* VoiceAgentGlobalHotkeyTests.swift */,
 				C0DEB05E0000000000000102 /* VoiceSemanticModeTests.swift */,
 				C1A2B3C4D5E6F70800000002 /* CmuxConfigTests.swift */,
 				B1E0B1E0000000000000001E /* TerminalBlueprintLayoutTests.swift */,
@@ -12456,6 +12462,7 @@ B8B056D80000000000000002 /* MobileHostIdentityTests.swift */ = {isa = PBXFileRef
 				B43AFCE7099305905825EA0A /* VMTunnelManager.swift in Sources */,
 				C0DEB01C0000000000000005 /* VoiceAgentAudioWebView.swift in Sources */,
 				C0DEB01C0000000000000007 /* VoiceAgentFeature.swift in Sources */,
+				C0DEB01C0000000000000301 /* VoiceAgentGlobalHotkey.swift in Sources */,
 				C0DEB01C0000000000000009 /* VoiceAgentSessionState.swift in Sources */,
 				C0DEB01C000000000000000B /* VoiceAgentSidebarView.swift in Sources */,
 				C0DEB01C000000000000000D /* VoiceAgentSidecar.swift in Sources */,
@@ -13628,6 +13635,7 @@ B8B056D80000000000000002 /* MobileHostIdentityTests.swift */ = {isa = PBXFileRef
 				C37800000000000000000001 /* VMSSHCommandTests.swift in Sources */,
 				ABE558B281D671A6DDDDD066 /* VMTunnelManagerTests.swift in Sources */,
 				F6AAAA235B7F431E8D1D2E94 /* VMTunnelStalenessTests.swift in Sources */,
+				C0DEB01C0000000000000303 /* VoiceAgentGlobalHotkeyTests.swift in Sources */,
 				C0DEB01C0000000000000101 /* VoiceAgentSidecarTests.swift in Sources */,
 				C0DEB05E0000000000000101 /* VoiceSemanticModeTests.swift in Sources */,
 				063BC42CEE257D6213A2E30C /* WindowAndDragTests.swift in Sources */,

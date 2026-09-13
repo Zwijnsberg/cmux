@@ -10,9 +10,17 @@ enum VoiceAgentFeature {
     static let trustTerminalInputKey = "voiceAgent.trustTerminalInput"
     static let startCommandKey = "voiceAgent.startCommand"
     static let voiceKey = "voiceAgent.voice"
+    static let globalHotkeyKey = "voiceAgent.globalHotkey"
 
     nonisolated static func isEnabled(defaults: UserDefaults = .standard) -> Bool {
         defaults.bool(forKey: enabledKey)
+    }
+
+    /// When on (the default), tapping Command+Option on their own, from any
+    /// app, starts or ends the voice session. Needs the voice beta and, to
+    /// work while cmux is in the background, Accessibility permission.
+    nonisolated static func isGlobalHotkeyEnabled(defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: globalHotkeyKey) as? Bool ?? true
     }
 
     /// When on, `run_command` executes without a spoken confirmation.

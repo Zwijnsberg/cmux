@@ -27,6 +27,16 @@ public struct VoiceAgentCatalogSection: SettingCatalogSection {
         userDefaultsKey: "voiceAgent.startCommand"
     )
 
+    /// When on, tapping Command+Option on their own (no other key) starts or
+    /// ends the voice session from any app. Global delivery needs macOS
+    /// Accessibility permission; without it the chord works only while cmux
+    /// is frontmost.
+    public let globalHotkey = DefaultsKey<Bool>(
+        id: "voiceAgent.globalHotkey",
+        defaultValue: true,
+        userDefaultsKey: "voiceAgent.globalHotkey"
+    )
+
     /// Optional Ultravox voice id.
     public let voice = DefaultsKey<String>(
         id: "voiceAgent.voice",
