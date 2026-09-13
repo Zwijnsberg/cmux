@@ -34,7 +34,9 @@ def test_resolve_pane_by_direction_uses_frames():
     st = UIState.from_tree(sample_tree(), sample_panes()["panes"])
     assert st.resolve_pane("right").id == "P-B2"
     assert st.resolve_pane("to the right").id == "P-B2"
-    assert st.resolve_pane("left") is None  # nothing left of the focused pane
+    assert st.resolve_pane("to the left") is None  # nothing left of the focused pane
+    assert st.resolve_pane("left").id == "P-B1"  # "the left one" is a place, not a direction
+    assert st.resolve_pane("the pane on the right").id == "P-B2"
     assert st.resolve_pane("2").id == "P-B2"
     assert st.resolve_pane(None).id == "P-B1"
 
@@ -114,7 +116,7 @@ async def test_focus_pane_right(tools: VoiceTools, fake: FakeCmux):
 
 
 async def test_focus_pane_unknown_direction_fails_softly(tools: VoiceTools, fake: FakeCmux):
-    res = await tools.focus_pane("left")
+    res = await tools.focus_pane("to the left")
     assert res["ok"] is False
     assert "pane.focus" not in fake.methods()
 
@@ -272,9 +274,11 @@ def test_specs_cover_v1_catalog(tools: VoiceTools):
         "shell_context", "go_to_directory", "run_shell", "compose_and_type", "press_enter", "open_agent", "close_pane",
         "create_workspace_group", "rename_workspace_group", "focus_workspace_group", "create_workspace_in_group", "rename_tab", "git_action", "create_worktree", "quit_agent",
         "summarize_agent",
+        "arrange_terminals", "remove_worktree", "list_worktrees",
+        "move_workspace_to_group", "remove_workspace_from_group", "delete_workspace_group",
     }
     confirming = {s.name for s in tools.specs() if "Requires confirmation" in s.description}
-    assert confirming == {"close_workspace", "close_tab", "close_pane", "run_command", "run_shell"}
+    assert confirming == {"close_workspace", "close_tab", "close_pane", "run_command", "run_shell", "remove_worktree", "delete_workspace_group"}
     assert all(s.cancel_on_interruption for s in tools.specs())
 
 
@@ -561,7 +565,10 @@ async def test_run_command_output_excludes_prompt_lines(fake: FakeCmux):
     client.close()
 
 
-async def test_split_refuses_when_pane_too_narrow(fake: FakeCmux):
+async def test_split_never_refuses_for_width_but_relays_cmux(fake: FakeCmux):
+    """The UI splits a 40-column pane happily, so the voice agent must too; the
+    old 120-column rule refused splits the user could do by hand. If cmux itself
+    refuses, that answer is passed on."""
     from tests.conftest import sample_panes
     rows = sample_panes(); rows["panes"][0]["columns"] = 40; rows["panes"][0]["rows"] = 46
     base = fake.responder
@@ -569,11 +576,139 @@ async def test_split_refuses_when_pane_too_narrow(fake: FakeCmux):
     client = CmuxClient(fake.path, allowed_methods=ALLOWED_METHODS)
     t = VoiceTools(client, ConfirmationPolicy(trust_terminal_input=True))
     res = await t.split("right")
-    assert res["ok"] is False and "too narrow" in res["say"]
-    assert "surface.split" not in fake.methods()
-    res = await t.split("down")
-    assert res["ok"]
+    assert res["ok"] and {"method": "surface.split", "params": {"direction": "right", "type": "terminal", "focus": True}} in fake.requests
+
+    def refusing(m, p):
+        if m == "surface.split":
+            raise ValueError("pane too small to split")
+        return rows if m == "pane.list" else base(m, p)
+
+    fake.responder = refusing
+    res = await t.split("right")
+    assert res["ok"] is False and "too small" in res["say"]
     client.close()
+
+
+async def test_open_agent_allows_narrow_but_usable_terminals(fake: FakeCmux, monkeypatch):
+    """60 columns used to be refused; Claude Code draws fine there."""
+    import cmux_voice.tools as t
+
+    async def no_sleep(_):
+        return None
+
+    monkeypatch.setattr(t.asyncio, "sleep", no_sleep)
+    from tests.conftest import sample_panes
+    rows = sample_panes(); rows["panes"][0]["columns"] = 58
+    base = fake.responder
+    fake.responder = lambda m, p: rows if m == "pane.list" else ({"text": "────\n❯ \n────\n"} if m == "surface.read_text" else base(m, p))
+    client = CmuxClient(fake.path, allowed_methods=ALLOWED_METHODS)
+    vt = VoiceTools(client, ConfirmationPolicy(trust_terminal_input=True))
+    res = await vt.open_agent("claude")
+    assert res["ok"], res
+    client.close()
+
+
+class GridCmux:
+    """A fake layout that really splits: `surface.split` halves the focused
+    pane's frame, so pane positions (top-left, ...) evolve like the app's."""
+
+    def __init__(self) -> None:
+        self.panes = [{"id": "P1", "frame": {"x": 0.0, "y": 0.0, "width": 1000.0, "height": 800.0}, "focused": True, "surface": "S1"}]
+        self.n = 1
+
+    def tree(self):
+        panes = []
+        for i, p in enumerate(self.panes):
+            panes.append({"id": p["id"], "ref": f"pane:{i + 1}", "index": i, "focused": p["focused"],
+                          "surfaces": [{"id": p["surface"], "ref": f"surface:{i + 1}", "type": "terminal", "title": f"zsh {p['surface']}",
+                                        "index_in_pane": 0, "selected_in_pane": True, "focused": p["focused"]}]})
+        return {"windows": [{"id": "W", "key": True, "visible": True, "workspaces": [
+            {"id": "WS", "ref": "workspace:1", "index": 0, "title": "grid", "selected": True, "panes": panes}]}]}
+
+    def respond(self, m, p):
+        if m == "system.tree":
+            return self.tree()
+        if m == "pane.list":
+            return {"panes": [{"id": x["id"], "ref": f"pane:{i + 1}", "index": i, "focused": x["focused"], "pixel_frame": x["frame"], "columns": 100} for i, x in enumerate(self.panes)]}
+        if m == "pane.focus":
+            for x in self.panes:
+                x["focused"] = x["id"] == p["pane_id"]
+            return {}
+        if m == "surface.focus":
+            for x in self.panes:
+                x["focused"] = x["surface"] == p["surface_id"]
+            return {}
+        if m == "surface.split":
+            src = next(x for x in self.panes if x["focused"])
+            f = dict(src["frame"])
+            self.n += 1
+            if p["direction"] == "right":
+                src["frame"] = {**f, "width": f["width"] / 2}
+                nf = {**f, "x": f["x"] + f["width"] / 2, "width": f["width"] / 2}
+            else:
+                src["frame"] = {**f, "height": f["height"] / 2}
+                nf = {**f, "y": f["y"] + f["height"] / 2, "height": f["height"] / 2}
+            src["focused"] = False
+            self.panes.append({"id": f"P{self.n}", "frame": nf, "focused": True, "surface": f"S{self.n}"})
+            return {"surface_id": f"S{self.n}"}
+        return {}
+
+
+async def test_arrange_terminals_builds_a_two_by_two_grid_and_lands_top_left(fake: FakeCmux, monkeypatch):
+    import cmux_voice.tools as t
+
+    async def no_sleep(_):
+        return None
+
+    monkeypatch.setattr(t.asyncio, "sleep", no_sleep)
+    grid = GridCmux()
+    fake.responder = grid.respond
+    client = CmuxClient(fake.path, allowed_methods=ALLOWED_METHODS)
+    vt = VoiceTools(client, ConfirmationPolicy(trust_terminal_input=True))
+    res = await vt.arrange_terminals(4)
+    assert res["ok"] and res["terminals"] == 4 and res["created"] == ["S2", "S3", "S4"]
+    focused = [r["params"]["pane_id"] for r in fake.requests if r["method"] == "pane.focus"]
+    assert focused == ["P1", "P2", "P1", "P1"]  # split right, split the right one down, split the top-left down, land top-left
+    st = await vt.refresh()
+    assert {p.id: p.position for p in st.current_workspace.panes} == {"P1": "top-left", "P2": "top-right", "P3": "bottom-right", "P4": "bottom-left"}
+    assert st.focused_pane.id == "P1"
+    assert (await vt.arrange_terminals(5))["ok"] is False
+    client.close()
+
+
+async def test_positional_targets_pick_one_terminal(fake: FakeCmux, monkeypatch):
+    """After a group action, "prompt Claude in the top-left terminal" goes to
+    exactly that terminal, whatever is focused."""
+    import cmux_voice.tools as t
+
+    async def no_sleep(_):
+        return None
+
+    monkeypatch.setattr(t.asyncio, "sleep", no_sleep)
+    grid = GridCmux()
+    fake.responder = grid.respond
+    client = CmuxClient(fake.path, allowed_methods=ALLOWED_METHODS)
+    vt = VoiceTools(client, ConfirmationPolicy(trust_terminal_input=True))
+    await vt.arrange_terminals(4)
+    grid.respond("pane.focus", {"pane_id": "P3"})  # the user clicked bottom-right
+    fake.requests.clear()
+    assert (await vt.compose_and_type("Add tests.", target="top left"))["ok"]
+    assert (await vt.compose_and_type("Fix lint.", target="the upper right one"))["ok"]
+    assert (await vt.compose_and_type("Run it.", target="bottom-right"))["ok"]
+    assert (await vt.compose_and_type("Here.", target=None))["ok"]  # no target: the focused one
+    typed = [(r["params"]["surface_id"], r["params"]["text"]) for r in fake.requests if r["method"] == "surface.send_text"]
+    assert typed == [("S1", "Add tests."), ("S2", "Fix lint."), ("S3", "Run it."), ("S3", "Here.")]
+    assert len([r for r in fake.requests if r["method"] == "surface.send_key"]) == 4  # one enter per prompt, no fan-out
+    res = await vt.compose_and_type("x", target="middle")
+    assert res["ok"] is False and "no terminal middle" in res["say"]
+    client.close()
+
+
+def test_is_positional_separates_places_from_names():
+    from cmux_voice.state import is_positional
+
+    assert all(is_positional(x) for x in ("top left", "the upper-right one", "bottom", "to the left", "the pane on the right", "right terminal"))
+    assert not any(is_positional(x) for x in ("github", "npm run dev", "api", "", None, "left field"))
 
 
 async def test_open_agent_refuses_narrow_terminal(fake: FakeCmux):

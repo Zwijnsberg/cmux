@@ -99,8 +99,8 @@ def with_reply_hint(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
     """Attach an instruction for the spoken reply.
 
     Ultravox sees the tool result as data; the hint states what kind of reply
-    this outcome needs. Actions get silence (the result on screen is the
-    confirmation); questions get an answer; problems get a few words.
+    this outcome needs. Actions get exactly one word ("Done."); questions get
+    an answer; problems get one short sentence.
     """
     out = dict(result)
     if out.get("reply"):
@@ -111,15 +111,17 @@ def with_reply_hint(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
     elif status == "ambiguous":
         out["reply"] = "Read the options aloud briefly and ask which one they meant."
     elif status == "nothing_pending":
-        out["reply"] = "Say there was nothing waiting to confirm, in a few words."
+        out["reply"] = "Say only: Nothing to confirm."
     elif out.get("ok") is False:
-        out["reply"] = "Say in a few words that this did not work and why. No next steps unless asked."
+        out["reply"] = "Say in one short sentence that this did not work and why. Nothing else."
     elif tool_name in QUERY_TOOLS:
         out["reply"] = "Answer the user's question from this information in one or two short spoken sentences."
     elif tool_name in {"run_shell", "run_command"} and out.get("output"):
-        out["reply"] = "If the user asked a question, answer it from the output in one short sentence (read short lists, summarize long output). If they asked for an action, say nothing at all."
+        out["reply"] = "If the user asked a question, answer it from the output in one short sentence (read short lists, summarize long output). If they asked for an action, say only: Done."
+    elif tool_name in {"list_worktrees"}:
+        out["reply"] = "Answer from this information in one short spoken sentence."
     else:
-        out["reply"] = "Say nothing at all: no confirmation, no description of what happened. Respond with silence."
+        out["reply"] = "Say only the word: Done. Nothing else."
     return out
 
 

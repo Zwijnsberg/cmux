@@ -20,7 +20,7 @@ from .cmux_client import CmuxClient, CmuxError
 from . import shell_context as shellctx
 from .policy import ConfirmationPolicy
 from .semantic import SemanticSession
-from .state import Pane, Surface, UIState, Workspace
+from .state import Pane, Surface, UIState, Workspace, is_positional
 
 Handler = Callable[..., Awaitable[Dict[str, Any]]]
 
@@ -63,6 +63,8 @@ ALLOWED_METHODS = frozenset(
         "workspace.group.focus",
         "workspace.group.new_workspace",
         "workspace.group.add",
+        "workspace.group.remove",
+        "workspace.group.delete",
         "surface.rename",
         "surface.focus",
         "surface.split",
@@ -239,6 +241,19 @@ class VoiceTools:
         return next((p for p in ws.panes if any(x.id == surface.id for x in p.surfaces)), None)
 
     async def _terminal(self, target: Optional[str]) -> Surface | Dict[str, Any]:
+        if target and is_positional(target):
+            # "top left", "the one on the right", "bottom": a pane position or
+            # direction rather than a tab name. Take that pane's shown terminal.
+            st = await self._state_fresh() or await self._state()
+            pane = st.resolve_pane(target)
+            if pane is not None:
+                shown = pane.selected_surface
+                if shown is not None and shown.is_terminal:
+                    return shown
+                for s in pane.surfaces:
+                    if s.is_terminal:
+                        return s
+            return self._fail(f"There is no terminal {target}.")
         return await self._surface_of_kind(target, "terminal", "I could not find a terminal to type into.")
 
     async def _browser(self, target: Optional[str]) -> Surface | Dict[str, Any]:
@@ -381,20 +396,25 @@ class VoiceTools:
 
         return self.policy.stage("close_workspace", {"target": target}, f"Close workspace {ws.title} with {tabs} tab{'s' if tabs != 1 else ''}?", execute)
 
-    MIN_SPLIT_COLUMNS = 60  # a terminal narrower than this cannot show an agent CLI or a diff
+    # Below this an agent CLI cannot draw its input box at all. Anything wider
+    # is the user's call: cmux itself refuses a split that would not fit, and
+    # that refusal is relayed as-is. (An earlier 60/120-column rule refused
+    # splits the UI happily performs.)
+    MIN_AGENT_COLUMNS = 40
 
-    async def split(self, direction: str = "right", kind: str = "terminal", url: Optional[str] = None) -> Dict[str, Any]:
+    async def split(self, direction: str = "right", kind: str = "terminal", url: Optional[str] = None, target: Optional[str] = None) -> Dict[str, Any]:
         d = (direction or "right").strip().lower()
         if d not in {"left", "right", "up", "down"}:
             return self._fail("Direction must be left, right, up, or down.")
-        st = await self._state_fresh() or await self._state()
-        pane = st.focused_pane
-        if pane is not None and d in {"left", "right"} and pane.columns and pane.columns < 2 * self.MIN_SPLIT_COLUMNS:
-            n = len(st.current_workspace.panes) if st.current_workspace else 0
-            return self._fail(
-                f"This pane is only {pane.columns} columns wide, so splitting it sideways would leave both halves too narrow to use. "
-                + (f"There are already {n} panes here; say close this pane, or split down instead." if n > 1 else "Say split down instead, or make the window wider.")
-            )
+        if target:
+            # surface.split always splits the focused surface: focus the named one first.
+            s = await self._terminal(target)
+            if isinstance(s, dict):
+                return s
+            try:
+                await self.client.acall("surface.focus", {"surface_id": s.id})
+            except CmuxError as e:
+                return self._fail(f"I couldn't focus {s.title or 'that terminal'}: {e}")
         k = (kind or "terminal").strip().lower()
         try:
             if k == "browser" or url:
@@ -411,6 +431,61 @@ class VoiceTools:
             return await self._done(f"Split {d}.", flash_surface=sid, surface_id=sid)
         except CmuxError as e:
             return self._fail(f"I couldn't split: {e}")
+
+    # How a grid of N terminals is built from one pane: (which pane to split,
+    # direction), in order. Positions are those get_ui_state reports.
+    _GRIDS = {
+        2: [("focused", "right")],
+        3: [("focused", "right"), ("right", "down")],
+        4: [("focused", "right"), ("right", "down"), ("top-left", "down")],
+        6: [("focused", "right"), ("right", "right"), ("top-left", "down"), ("top-middle", "down"), ("top-right", "down")],
+    }
+
+    async def arrange_terminals(self, count: int = 4) -> Dict[str, Any]:
+        """One call for "make N terminals": split the focused pane into a grid
+        (2: side by side; 3: one left, two stacked right; 4: two by two;
+        6: three by two) and land in the top-left one. This is a single group
+        action; whatever the user asks next applies to one terminal again."""
+        try:
+            n = int(count)
+        except (TypeError, ValueError):
+            return self._fail("How many terminals?")
+        if n <= 1:
+            return {"ok": True, "say": "There is already a terminal here.", "terminals": 1}
+        steps = self._GRIDS.get(n)
+        if steps is None:
+            return self._fail(f"I can lay out 2, 3, 4, or 6 terminals, not {n}.")
+        st = await self._state_fresh() or await self._state()
+        origin = st.focused_pane
+        if origin is None:
+            return self._fail("There is no pane to split.")
+        first_id = origin.id
+        created: List[str] = []
+        for which, direction in steps:
+            st = await self._state_fresh() or st
+            if which == "focused":
+                pane = st.focused_pane
+            else:
+                pane = next((p for p in (st.current_workspace.panes if st.current_workspace else []) if p.position == which), None)
+                if pane is None and st.current_workspace and len(st.current_workspace.panes) == 2:
+                    # Two panes side by side have positions "left"/"right".
+                    pane = next((p for p in st.current_workspace.panes if p.position == which.split("-")[-1]), None)
+            if pane is None:
+                return self._fail(f"I split {len(created) + 1} of {n} terminals, then lost track of the layout. Say what do I have open to check.")
+            try:
+                await self.client.acall("pane.focus", {"pane_id": pane.id})
+                res = await self.client.acall("surface.split", {"direction": direction, "type": "terminal", "focus": True}) or {}
+            except CmuxError as e:
+                return self._fail(f"cmux refused split {len(created) + 1} of {n}: {e}")
+            if res.get("surface_id"):
+                created.append(res["surface_id"])
+        # Land in the original (top-left) terminal.
+        try:
+            await self.client.acall("pane.focus", {"pane_id": first_id})
+        except CmuxError:
+            pass
+        await self._land_in(None)
+        return await self._done(f"Made {n} terminals.", terminals=n, created=created)
 
     async def new_tab(self, kind: str = "terminal", url: Optional[str] = None) -> Dict[str, Any]:
         k = (kind or "terminal").strip().lower()
@@ -790,7 +865,7 @@ class VoiceTools:
             self._awaiting_name.add(surface_id)
             return {
                 "name_this_terminal": True,
-                "reply": "Now call rename_tab with a two-word summary of the topic of that prompt (Title Case, e.g. Login Tests), then say nothing.",
+                "reply": "Now call rename_tab with a two-word summary of the topic of that prompt (Title Case, e.g. Login Tests), then say only: Done.",
             }
         if current is not None and current.lower() == title.lower():
             return {}
@@ -921,11 +996,8 @@ class VoiceTools:
         if isinstance(s, dict):
             return s
         pane = self._pane_of(s)
-        if pane is not None and pane.columns and pane.columns < self.MIN_SPLIT_COLUMNS:
-            return self._fail(
-                f"That terminal is only {pane.columns} columns wide, too narrow for {agent} to draw its screen. "
-                "Say close the other panes or equalize the splits first, then open it again."
-            )
+        if pane is not None and pane.columns and pane.columns < self.MIN_AGENT_COLUMNS:
+            return self._fail(f"That terminal is only {pane.columns} columns wide, too narrow for {agent} to draw its input box.")
         label = {"claude": "Claude Code", "codex": "Codex", "opencode": "OpenCode", "gemini": "Gemini", "pi": "Pi"}[binary]
         # Already running here? Then just use it (type the prompt if given).
         if await self._agent_box_visible(s.id):
@@ -1015,6 +1087,60 @@ class VoiceTools:
         except CmuxError as e:
             return self._fail(f"I couldn't create a workspace in {g.name}: {e}")
         return await self._done(f"Created workspace {name.strip()} in group {g.name}." if name else f"Created a workspace in group {g.name}.", workspace_id=wid)
+
+    async def move_workspace_to_group(self, group: str, workspace: Optional[str] = None) -> Dict[str, Any]:
+        """Put a workspace (by name; default the current one) into a named
+        group, leaving whatever group it was in. The workspace itself is untouched."""
+        if not group or not group.strip():
+            return self._fail("Which group?")
+        st = await self._state_fresh() or await self._state()
+        ws = st.resolve_workspace(workspace)
+        if ws is None:
+            names = [w.title for w in st.workspaces if w.title][:4]
+            return self._fail(f"I could not find a workspace called {workspace}." + (f" I know: {', '.join(names)}." if names else ""))
+        g = st.resolve_group(group)
+        if g is None:
+            names = [x.name for x in st.groups][:4]
+            return self._fail(f"I could not find a group called {group}." + (f" Groups: {', '.join(names)}." if names else " There are no groups yet; say new group called <name>."))
+        if ws.id in g.member_workspace_ids:
+            return {"ok": True, "say": f"{ws.title} is already in {g.name}.", "workspace_id": ws.id, "group_id": g.id}
+        try:
+            await self.client.acall("workspace.group.add", {"group_id": g.id, "workspace_id": ws.id})
+        except CmuxError as e:
+            return self._fail(f"I couldn't move {ws.title} into {g.name}: {e}")
+        return await self._done(f"Moved {ws.title} into {g.name}.", workspace_id=ws.id, group_id=g.id)
+
+    async def remove_workspace_from_group(self, workspace: Optional[str] = None) -> Dict[str, Any]:
+        """Take a workspace (default the current one) out of its group; it stays open, ungrouped."""
+        st = await self._state_fresh() or await self._state()
+        ws = st.resolve_workspace(workspace)
+        if ws is None:
+            return self._fail(f"I could not find a workspace called {workspace}.")
+        g = st.group_of(ws)
+        if g is None:
+            return {"ok": True, "say": f"{ws.title} is not in a group.", "workspace_id": ws.id}
+        try:
+            await self.client.acall("workspace.group.remove", {"group_id": g.id, "workspace_id": ws.id})
+        except CmuxError as e:
+            return self._fail(f"I couldn't take {ws.title} out of {g.name}: {e}")
+        return await self._done(f"Took {ws.title} out of {g.name}.", workspace_id=ws.id, group_id=g.id)
+
+    async def delete_workspace_group(self, target: str) -> Dict[str, Any]:
+        """Delete a group (the sidebar folder). Its workspaces stay open. Confirm-gated."""
+        st = await self._state_fresh() or await self._state()
+        g = st.resolve_group(target)
+        if g is None:
+            return self._fail(f"I could not find a group called {target}.")
+        n = len(g.member_workspace_ids)
+
+        async def execute() -> Dict[str, Any]:
+            try:
+                await self.client.acall("workspace.group.delete", {"group_id": g.id, "close_workspaces": False})
+            except CmuxError as e:
+                return self._fail(f"I couldn't delete the group: {e}")
+            return await self._done(f"Deleted group {g.name}; its workspaces are still open.", group_id=g.id)
+
+        return self.policy.stage("delete_workspace_group", {"target": target}, f"Delete the group {g.name}? Its {n} workspace{'s' if n != 1 else ''} stay open.", execute)
 
     async def rename_tab(self, title: str, target: Optional[str] = None) -> Dict[str, Any]:
         """Name a split tab (surface). Default: the focused one."""
@@ -1140,6 +1266,95 @@ class VoiceTools:
                 say += " Claude Code is open there."
         return await self._done(say, workspace_id=res.get("workspace_id"), path=path, branch=name)
 
+    def _worktree_rows(self, root: str) -> List[Dict[str, str]]:
+        out = shellctx._run(["git", "-C", root, "worktree", "list", "--porcelain"], 10.0)
+        rows: List[Dict[str, str]] = []
+        cur: Dict[str, str] = {}
+        for line in out.splitlines() + [""]:
+            if not line.strip():
+                if cur:
+                    rows.append(cur)
+                cur = {}
+                continue
+            key, _, value = line.partition(" ")
+            cur[key] = value
+        return rows
+
+    async def _repo_root(self, target: Optional[str]) -> str | Dict[str, Any]:
+        s = await self._terminal(target)
+        if isinstance(s, dict):
+            return s
+        ctx = await self._shell_context(s)
+        if not ctx.git_root:
+            return self._fail("This folder is not a git repository, so there are no worktrees here.")
+        # From inside a worktree, the main checkout is the first row of `git worktree list`.
+        rows = await asyncio.to_thread(self._worktree_rows, ctx.git_root)
+        return rows[0].get("worktree", ctx.git_root) if rows else ctx.git_root
+
+    async def list_worktrees(self, target: Optional[str] = None) -> Dict[str, Any]:
+        """The git worktrees of the current repository (folders on disk), by branch."""
+        root = await self._repo_root(target)
+        if isinstance(root, dict):
+            return root
+        rows = await asyncio.to_thread(self._worktree_rows, root)
+        items = []
+        for r in rows[1:]:
+            branch = r.get("branch", "").replace("refs/heads/", "") or "(detached)"
+            items.append({"branch": branch, "path": r.get("worktree", "")})
+        if not items:
+            return {"ok": True, "say": "There are no worktrees besides the main checkout.", "worktrees": []}
+        names = ", ".join(i["branch"] for i in items)
+        return {"ok": True, "say": f"{len(items)} worktree{'s' if len(items) != 1 else ''}: {names}.", "worktrees": items}
+
+    async def remove_worktree(self, branch: str, target: Optional[str] = None) -> Dict[str, Any]:
+        """Remove a git worktree folder (never a cmux workspace). The branch is
+        kept. A workspace that was showing that folder is closed too, since its
+        directory is gone. Confirm-gated."""
+        if not branch or not branch.strip():
+            return self._fail("Which worktree?")
+        root = await self._repo_root(target)
+        if isinstance(root, dict):
+            return root
+        rows = await asyncio.to_thread(self._worktree_rows, root)
+        wanted = branch.strip()
+        candidates = [(r.get("branch", "").replace("refs/heads/", "") or os.path.basename(r.get("worktree", "")), r) for r in rows[1:]]
+        hit = None
+        for name, r in candidates:
+            if name.lower() == wanted.lower() or os.path.basename(r.get("worktree", "")).lower() == wanted.lower():
+                hit = (name, r)
+                break
+        if hit is None:
+            from .state import _best_name_match
+            r = _best_name_match(wanted, [(name, r) for name, r in candidates])
+            if r is not None:
+                hit = (r.get("branch", "").replace("refs/heads/", "") or os.path.basename(r.get("worktree", "")), r)
+        if hit is None:
+            known = ", ".join(n for n, _ in candidates) or "none"
+            return self._fail(f"There is no worktree called {wanted}. Worktrees: {known}.")
+        name, row = hit
+        path = row.get("worktree", "")
+        st = await self._state_fresh() or await self._state()
+        showing = [w for w in st.workspaces if w.current_directory and (w.current_directory == path or w.current_directory.startswith(path.rstrip("/") + "/"))]
+
+        async def execute() -> Dict[str, Any]:
+            out = await asyncio.to_thread(shellctx._run, ["git", "-C", root, "worktree", "remove", "--force", path], 30.0)
+            if os.path.isdir(path):
+                return self._fail(f"git could not remove the worktree {name}. {out.strip()[:120]}")
+            closed = []
+            for w in showing:
+                try:
+                    await self.client.acall("workspace.close", {"workspace_id": w.id})
+                    closed.append(w.title)
+                except CmuxError:
+                    pass
+            extra = f" and closed its workspace {closed[0]}" if closed else ""
+            return await self._done(f"Removed worktree {name}{extra}. The branch {name} still exists.", branch=name, path=path, closed_workspaces=closed)
+
+        summary = f"Remove the worktree {name} (the folder {os.path.basename(path)})?"
+        if showing:
+            summary += f" The workspace {showing[0].title} showing it will close too."
+        return self.policy.stage("remove_worktree", {"branch": name}, summary, execute)
+
     async def quit_agent(self, target: Optional[str] = None) -> Dict[str, Any]:
         """Leave the agent CLI in the terminal (types its /exit and presses enter; falls back to ctrl-d)."""
         s = await self._terminal(target)
@@ -1236,7 +1451,7 @@ class VoiceTools:
     def specs(self) -> List[ToolSpec]:
         target_prop = {
             "type": "string",
-            "description": "Optional. A number from get_ui_state, a name, or words like 'current', 'this'. Omit for the focused one.",
+            "description": "Optional. ONE terminal: a tab name, a position from get_ui_state such as 'top-left', 'top-right', 'bottom-left', 'bottom-right', 'left', 'right', 'top', 'bottom', a number, or 'this'. Omit for the focused one.",
         }
         pane_target_prop = {
             "type": "string",
@@ -1250,8 +1465,9 @@ class VoiceTools:
             ToolSpec("focus_tab", "Show a tab (surface) by number within the focused pane or by title.", {"target": {"type": "string", "description": "Tab number or title."}}, self.focus_tab, required=["target"]),
             ToolSpec("create_workspace", "Create a new workspace and switch to it.", {"name": {"type": "string", "description": "Optional title."}, "working_directory": {"type": "string", "description": "Optional directory path."}}, self.create_workspace),
             ToolSpec("rename_workspace", "Rename a workspace.", {"title": {"type": "string", "description": "The new name."}, "target": target_prop}, self.rename_workspace, required=["title"]),
-            ToolSpec("close_workspace", "Close a workspace. Requires confirmation.", {"target": target_prop}, self.close_workspace),
-            ToolSpec("split", "Split the focused pane and open a new terminal or browser there.", {"direction": {"type": "string", "enum": ["left", "right", "up", "down"], "description": "Where the new pane goes. Default right."}, "kind": {"type": "string", "enum": ["terminal", "browser"], "description": "What to open. Default terminal."}, "url": {"type": "string", "description": "For a browser, the address to open."}}, self.split),
+            ToolSpec("close_workspace", "Close a WORKSPACE (a sidebar row). Never for a worktree: 'delete the worktree' is remove_worktree. Requires confirmation.", {"target": target_prop}, self.close_workspace),
+            ToolSpec("split", "Split ONE pane (the focused one, or the target) and open a new terminal or browser there. For a whole grid ('make four terminals') use arrange_terminals instead.", {"direction": {"type": "string", "enum": ["left", "right", "up", "down"], "description": "Where the new pane goes. Default right."}, "kind": {"type": "string", "enum": ["terminal", "browser"], "description": "What to open. Default terminal."}, "url": {"type": "string", "description": "For a browser, the address to open."}, "target": target_prop}, self.split),
+            ToolSpec("arrange_terminals", "Split the focused pane into a grid of N terminals in one call (2 side by side, 3, 4 two-by-two, 6) and land in the top-left one. Use for 'make/create N terminals', 'split into four', 'two by two'. One group action; the next request applies to one terminal again.", {"count": {"type": "integer", "description": "Total terminals wanted: 2, 3, 4, or 6."}}, self.arrange_terminals, required=["count"]),
             ToolSpec("new_tab", "Open a new tab in the focused pane.", {"kind": {"type": "string", "enum": ["terminal", "browser"], "description": "Default terminal."}, "url": {"type": "string", "description": "For a browser, the address to open."}}, self.new_tab),
             ToolSpec("close_tab", "Close a tab. Requires confirmation.", {"target": target_prop}, self.close_tab),
             ToolSpec("close_pane", "Close a whole pane (all of its tabs). Requires confirmation.", {"target": pane_target_prop}, self.close_pane),
@@ -1270,7 +1486,7 @@ class VoiceTools:
             ToolSpec("shell_context", "Report the terminal's working directory and git branch. Call before composing a shell or git command when the answer depends on where the user is.", {"target": target_prop}, self.shell_context),
             ToolSpec("go_to_directory", "Change the terminal's directory to a folder the user names. Finds it by name (relative to the current directory, then by search) and runs cd. Ask only if several folders share the name.", {"name": {"type": "string", "description": "Folder name or path as spoken, e.g. 'staff portal', 'voice agent', 'src/lib'."}, "parent": {"type": "string", "description": "Optional parent folder name to disambiguate."}, "target": target_prop}, self.go_to_directory, required=["name"]),
             ToolSpec("run_shell", "Run a shell or git command that YOU composed from the user's intent, e.g. 'switch to develop' -> git checkout develop. Compose exact, correct syntax; call shell_context first if it depends on the current branch or directory. Requires confirmation unless trusted input is on.", {"command": {"type": "string", "description": "The exact command line."}, "target": target_prop}, self.run_shell, required=["command"]),
-            ToolSpec("compose_and_type", "Send a message to the focused input, such as a Claude Code or Codex prompt: it is typed AND submitted with enter in one step. Use for 'tell it ...', 'ask it ...', 'have it ...', 'write down ...'. Never ask the user to say enter. Always pass topic: the first prompt into a terminal names that terminal after it.", {"text": {"type": "string", "description": "The text to send (verbatim, or rewritten when semantic mode is on)."}, "topic": {"type": "string", "description": "Exactly two words summarizing what the prompt is about, Title Case, e.g. 'Login Tests'. Always pass it; keep the same topic while the subject stays the same, pass a new one when the user moves to a different subject (the terminal is renamed)."}, "target": target_prop}, self.compose_and_type, required=["text", "topic"]),
+            ToolSpec("compose_and_type", "Send a message to ONE input (the focused terminal, or the target such as 'top-left'), e.g. a Claude Code or Codex prompt: it is typed AND submitted with enter in one step. Use for 'tell it ...', 'ask it ...', 'have it ...', 'prompt ...'. Never ask the user to say enter. One call sends to one terminal only. Always pass topic: the first prompt into a terminal names that terminal after it.", {"text": {"type": "string", "description": "The text to send (verbatim, or rewritten when semantic mode is on)."}, "topic": {"type": "string", "description": "Exactly two words summarizing what the prompt is about, Title Case, e.g. 'Login Tests'. Always pass it; keep the same topic while the subject stays the same, pass a new one when the user moves to a different subject (the terminal is renamed)."}, "target": target_prop}, self.compose_and_type, required=["text", "topic"]),
             ToolSpec("press_enter", "Press enter to submit whatever is in the focused input, terminal or agent CLI. Use when the user says enter, send, submit, or go.", {"target": target_prop}, self.press_enter),
             ToolSpec("open_agent", "Open a coding agent CLI (Claude Code by default; also Codex, OpenCode, Gemini, Pi) in the terminal. Optionally pass a first prompt from the user's request; it is typed and sent in the same call and names the terminal after topic. Never asks for confirmation.", {"agent": {"type": "string", "description": "claude (default), codex, opencode, gemini, or pi."}, "prompt": {"type": "string", "description": "Optional first prompt (verbatim, or rewritten when semantic mode is on)."}, "topic": {"type": "string", "description": "With a prompt: exactly two words summarizing its topic, Title Case, e.g. 'Login Tests'."}, "target": target_prop}, self.open_agent),
             ToolSpec("create_workspace_group", "Create a named workspace group in the sidebar, optionally containing existing workspaces.", {"name": {"type": "string"}, "workspaces": {"type": "array", "items": {"type": "string"}, "description": "Existing workspace names to put in the group."}}, self.create_workspace_group, required=["name"]),
@@ -1279,12 +1495,17 @@ class VoiceTools:
             ToolSpec("create_workspace_in_group", "Create a new workspace inside a named group, optionally naming it.", {"group": {"type": "string"}, "name": {"type": "string"}}, self.create_workspace_in_group, required=["group"]),
             ToolSpec("rename_tab", "Name a split tab (the focused one by default), e.g. 'call this tab server'.", {"title": {"type": "string"}, "target": target_prop}, self.rename_tab, required=["title"]),
             ToolSpec("git_action", "Run a common git operation from lazy intent; the exact command is composed for you. Actions: status, switch (checkout), create_branch, merge, commit (needs message), push, pull, fetch, stash, stash_pop, log, diff, branches, delete_branch.", {"action": {"type": "string"}, "branch": {"type": "string", "description": "Branch name when the action needs one."}, "message": {"type": "string", "description": "Commit message for commit."}, "target": target_prop}, self.git_action, required=["action"]),
-            ToolSpec("create_worktree", "Create a git worktree for a new (or existing) branch in the current repo, open it in a new named workspace, and optionally start Claude Code there.", {"branch": {"type": "string"}, "base": {"type": "string", "description": "Optional base branch or commit."}, "open_claude": {"type": "boolean", "description": "Also open Claude Code in the new workspace."}, "target": target_prop}, self.create_worktree, required=["branch"]),
+            ToolSpec("create_worktree", "Create a git WORKTREE (a checkout folder on its own branch) in the current repo, open it in a new workspace named '<repo> · <branch>', and optionally start Claude Code there. Only when the user says 'worktree'; a plain 'new workspace' is create_workspace.", {"branch": {"type": "string"}, "base": {"type": "string", "description": "Optional base branch or commit."}, "open_claude": {"type": "boolean", "description": "Also open Claude Code in the new workspace."}, "target": target_prop}, self.create_worktree, required=["branch"]),
+            ToolSpec("remove_worktree", "Remove a git WORKTREE folder by branch name (the branch is kept; a workspace showing that folder closes too). The only tool for 'delete/remove the worktree X'. Never use close_workspace for a worktree. Requires confirmation.", {"branch": {"type": "string", "description": "The worktree's branch or folder name."}, "target": target_prop}, self.remove_worktree, required=["branch"]),
+            ToolSpec("list_worktrees", "List the git worktrees of the current repository (folders on disk with their branches).", {"target": target_prop}, self.list_worktrees),
+            ToolSpec("move_workspace_to_group", "Put a workspace into a workspace group (a sidebar folder), leaving its old group if any. Use for 'move/put/place workspace X in(to) group Y' or 'move X to Y' when Y is a group. Default workspace: the current one.", {"group": {"type": "string", "description": "The group name."}, "workspace": {"type": "string", "description": "Workspace name; omit for the current one."}}, self.move_workspace_to_group, required=["group"]),
+            ToolSpec("remove_workspace_from_group", "Take a workspace out of its group; it stays open, ungrouped. Use for 'take X out of its group', 'ungroup X'. Default: the current workspace.", {"workspace": {"type": "string", "description": "Workspace name; omit for the current one."}}, self.remove_workspace_from_group),
+            ToolSpec("delete_workspace_group", "Delete a workspace group (the sidebar folder); its workspaces stay open. Requires confirmation.", {"target": {"type": "string", "description": "The group name."}}, self.delete_workspace_group, required=["target"]),
             ToolSpec("quit_agent", "Quit the agent CLI (Claude Code, Codex, ...) running in the terminal and return to the shell. Use for 'quit Claude', 'exit Claude Code', 'close Codex'.", {"target": target_prop}, self.quit_agent),
             ToolSpec("browser_navigate", "Open a web address in the browser tab, or in a new browser split if there is none.", {"url": {"type": "string", "description": "The address or domain to open."}, "target": target_prop}, self.browser_navigate, required=["url"]),
             ToolSpec("browser_history", "Go back, go forward, or reload in the browser.", {"action": {"type": "string", "enum": ["back", "forward", "reload"]}, "target": target_prop}, self.browser_history, required=["action"]),
             ToolSpec("confirm", "Pass on the user's answer to a pending confirmation question.", {"decision": {"type": "string", "enum": ["yes", "no"], "description": "The user's answer."}}, self.confirm, required=["decision"]),
-            ToolSpec("summarize_agent", "Read the terminal where a coding agent just finished so you can summarize it aloud. Call when the user answers yes to 'Terminal X is done. Would you like a summary?', or asks what Claude/Codex did. Default: the most recently finished terminal, else the focused one.", {"target": {"type": "string", "description": "Optional terminal, tab, or workspace name the user said."}}, self.summarize_agent),
+            ToolSpec("summarize_agent", "Read a terminal where a coding agent ran so you can summarize it aloud. Call ONLY when the user says 'summarize terminal <name>' or 'summarize this terminal'. Default: the most recently finished terminal, else the focused one.", {"target": {"type": "string", "description": "The terminal, tab, or workspace name the user said, e.g. the <name> from 'Terminal <name> has completed its work.'"}}, self.summarize_agent),
             ToolSpec("end_session", "End the voice session when the user says stop, goodbye, or that they are done.", {}, self.end_session),
         ]
 

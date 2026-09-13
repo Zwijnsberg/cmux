@@ -75,15 +75,16 @@ def test_tls_configuration_respects_existing_override(monkeypatch):
 
 
 def test_greeting_depends_on_whether_the_chat_log_was_empty(monkeypatch):
-    """A new conversation opens with the build question; toggling the mic
-    mid-conversation (chat log still on screen) gets a plain "Hey."."""
+    """A new conversation opens with "Hi."; toggling the mic mid-conversation
+    (chat log still on screen) gets "Hello.". Nothing longer: the agent's whole
+    vocabulary is hi, hello, done, and the finished-terminal sentence."""
     import bot
 
     monkeypatch.delenv("CMUX_VOICE_GREETING", raising=False)
     fresh = bot.first_speaker_settings("fresh")
-    assert fresh == {"agent": {"text": "Hi there, what should we build?", "uninterruptible": False}}
+    assert fresh == {"agent": {"text": "Hi.", "uninterruptible": False}}
     assert bot.first_speaker_settings(None) == fresh  # unknown -> treat as a new conversation
-    assert bot.first_speaker_settings("resume")["agent"]["text"] == "Hey."
+    assert bot.first_speaker_settings("resume")["agent"]["text"] == "Hello."
 
 
 def test_offer_request_data_picks_the_session_kind():
@@ -114,7 +115,7 @@ def test_greeting_reaches_ultravox_call_request(monkeypatch):
     monkeypatch.delenv("CMUX_VOICE_GREETING", raising=False)
     tools = VoiceTools(CmuxClient("/nonexistent.sock", allowed_methods=ALLOWED_METHODS), ConfirmationPolicy())
     llm = bot.build_llm(tools, output_medium="voice", ui_summary="", session="resume")
-    assert llm._params.extra["firstSpeakerSettings"]["agent"]["text"] == "Hey."
+    assert llm._params.extra["firstSpeakerSettings"]["agent"]["text"] == "Hello."
     # Turn-taking buffer: a little longer than Ultravox's 0.384 s default.
     assert llm._params.extra["vadSettings"]["turnEndpointDelay"] == "0.5s"
 
@@ -141,16 +142,25 @@ def test_prompt_is_hands_free():
     from cmux_voice.prompt import build_system_prompt
 
     prompt = build_system_prompt()
-    # Actions end with one word; prompts to agents are sent without "enter".
-    assert "say nothing at all" in prompt
-    assert "say exactly one word" not in prompt and 'say only "Done."' not in prompt
+    # The whole vocabulary: Done, the finished sentence, summaries on request, answers to questions.
+    assert '"Done." after an action succeeds' in prompt
+    assert "Everything else is silence" in prompt
     assert "Never ask the user to say \"enter\"" in prompt
     assert "never wait for them to confirm the prompt" in prompt
-    # Speak only when spoken to, or when an agent finishes.
-    assert "If the user is not talking to you, stay silent" in prompt
-    assert "Terminal <name> is done. Would you like a summary?" in prompt
-    assert "call summarize_agent" in prompt
+    assert '"Terminal <name> has completed its work."' in prompt and "Would you like a summary" not in prompt
+    assert '"summarize terminal <name>" -> summarize_agent(name)' in prompt
+    assert "Never summarize without being asked" in prompt
     assert "Next, you could tell it to" in prompt
+    # Worktree, workspace, and group are three different things with disjoint tools.
+    assert "Never confuse them" in prompt
+    assert "remove_worktree(X), never close_workspace" in prompt
+    assert "close_workspace(X), never remove_worktree" in prompt
+    assert "move_workspace_to_group(X, Y)" in prompt and "delete_workspace_group" in prompt
+    # Group actions end with their request; positions name one terminal.
+    assert "One request, one target" in prompt
+    assert "arrange_terminals(count)" in prompt
+    assert "ONE compose_and_type with target \"top-left\"" in prompt
+    assert "Splits are never refused for width by you" in prompt
     # Act as soon as the request is recognized, but wait out an unfinished sentence.
     assert "Act the moment you recognize the request" in prompt
     assert "clearly mid-sentence" in prompt and "keep listening" in prompt
@@ -164,8 +174,10 @@ def test_reply_hints_cover_every_outcome():
     assert "did not work" in bot.with_reply_hint("split", {"ok": False, "say": "no"})["reply"]
     assert "Answer the user" in bot.with_reply_hint("which_pane", {"ok": True, "say": "pane 1"})["reply"]
     # Every successful action: one word, nothing else.
-    for name in ("split", "compose_and_type", "open_agent", "focus_workspace", "press_enter"):
-        assert bot.with_reply_hint(name, {"ok": True, "say": "Done."})["reply"].startswith("Say nothing at all")
+    for name in ("split", "compose_and_type", "open_agent", "focus_workspace", "press_enter", "arrange_terminals", "move_workspace_to_group"):
+        assert bot.with_reply_hint(name, {"ok": True, "say": "Done."})["reply"] == "Say only the word: Done. Nothing else."
+    assert bot.with_reply_hint("split", {"ok": False, "say": "no"})["reply"].startswith("Say in one short sentence")
+    assert "one short spoken sentence" in bot.with_reply_hint("list_worktrees", {"ok": True, "say": "2 worktrees: a, b.", "worktrees": []})["reply"]
     assert "answer it from the output" in bot.with_reply_hint("run_shell", {"ok": True, "say": "Ran ls.", "output": "a.txt"})["reply"]
     # A handler that already says how to reply (summaries) is left alone.
     assert bot.with_reply_hint("summarize_agent", {"ok": True, "say": "…", "reply": "Summarize this."})["reply"] == "Summarize this."

@@ -35,8 +35,9 @@ AGENT_LABELS = {"claude": "Claude Code", "codex": "Codex", "opencode": "OpenCode
 
 
 def callout_sentence(terminal_name: str) -> str:
-    """The one sentence spoken the moment an agent finishes, anywhere."""
-    return f"Terminal {terminal_name} is done. Would you like a summary?"
+    """The one sentence spoken the moment an agent finishes, anywhere. No
+    offer of a summary: the user asks for one with "summarize terminal <name>"."""
+    return f"Terminal {terminal_name} has completed its work."
 
 
 @dataclass
@@ -66,8 +67,8 @@ class CompletionSummarizer:
         self.only_focused = only_focused
         self._last_by_surface: Dict[str, float] = {}
         self.history: List[SummaryRecord] = []
-        # Completions announced with "Terminal X is done. Would you like a
-        # summary?", newest last. Popped when the user asks for the summary.
+        # Completions announced with "Terminal X has completed its work.",
+        # newest last. Popped when the user asks for the summary.
         self.pending: Dict[str, FinishedAgent] = {}
 
     # ------------------------------------------------------------- pending
@@ -116,7 +117,7 @@ class CompletionSummarizer:
         self.defer(completion, terminal_name=name, workspace_title=ws_title or "", tab_title=tab_title or "")
         return (
             "[Agent finished. This is a system notice, not the user speaking. Interrupt whatever you were saying and say exactly this one sentence: "
-            f'"{callout_sentence(name)}" Then stop and call no tools. If the user answers yes, call summarize_agent.]'
+            f'"{callout_sentence(name)}" Then stop: no question, no offer, no tools. A summary is given only if the user later says "summarize terminal {name}".]'
         )
 
     async def terminal_name_for(self, completion: AgentCompletion) -> tuple[str, Optional[str], Optional[str]]:
