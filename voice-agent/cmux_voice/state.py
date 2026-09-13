@@ -88,6 +88,13 @@ class Workspace:
                 return p
         return self.panes[0] if self.panes else None
 
+    @property
+    def is_worktree(self) -> bool:
+        """A workspace that shows a git worktree folder (created by
+        create_worktree, or any folder under a worktrees directory)."""
+        cwd = (self.current_directory or "").replace("\\", "/")
+        return "/worktrees/" in cwd or " · " in self.title
+
 
 @dataclass
 class WorkspaceGroup:
@@ -218,13 +225,16 @@ class UIState:
 
     def resolve_group(self, target: Optional[str]) -> Optional["WorkspaceGroup"]:
         if target is None or not str(target).strip():
-            ws = self.current_workspace
-            if ws is not None:
-                for g in self.groups:
-                    if ws.id in g.member_workspace_ids:
-                        return g
-            return None
+            return self.group_of(self.current_workspace)
         return _best_name_match(str(target), [(g.name, g) for g in self.groups])
+
+    def group_of(self, workspace: Optional[Workspace]) -> Optional["WorkspaceGroup"]:
+        if workspace is None:
+            return None
+        for g in self.groups:
+            if workspace.id in g.member_workspace_ids:
+                return g
+        return None
 
     # -------------------------------------------------------------- resolvers
 
@@ -270,13 +280,25 @@ class UIState:
                 if p.ref == low:
                     return p
             return None
+        # Absolute positions first ("top left", "bottom-right", "the upper left
+        # one"): they name a pane regardless of which pane is focused. "To the
+        # left" stays relative to the focused pane.
+        position = None if low.startswith("to the ") else _position_word(low)
+        if position:
+            for p in ws.panes:
+                if p.position == position:
+                    return p
+            # "left"/"right"/"top"/"bottom" in a 2x2 grid: the pane in that
+            # row/column nearest the focused one, else the first such pane.
+            same = [p for p in ws.panes if p.position and position in p.position.split("-")]
+            if same:
+                focused = ws.focused_pane
+                if focused in same:
+                    return focused
+                return same[0]
         direction = _direction_word(low)
         if direction:
             return _pane_in_direction(ws.panes, ws.focused_pane, direction)
-        # Positional labels such as "left" already handled; try the assigned position words.
-        for p in ws.panes:
-            if p.position and p.position == low:
-                return p
         # Fall back to matching the pane by a surface title it contains.
         candidates = [(s.title, p) for p in ws.panes for s in p.surfaces]
         return _best_name_match(low, candidates)
@@ -342,6 +364,8 @@ class UIState:
         ws_bits = []
         for w in self.workspaces:
             label = f'{w.number} "{_short(w.title)}"'
+            if w.is_worktree:
+                label += " [worktree]"
             if w.selected:
                 label += " (current)"
             ws_bits.append(label)
@@ -363,6 +387,13 @@ class UIState:
                 pos = f" {p.position}" if p.position else ""
                 pane_bits.append(f"pane {p.number}{pos}: [" + ", ".join(surf_bits) + "]")
             parts.append(f'Current workspace "{_short(ws.title)}" has {len(ws.panes)} pane(s): ' + " | ".join(pane_bits))
+        if self.groups:
+            by_id = {w.id: w for w in self.workspaces}
+            group_bits = []
+            for g in self.groups:
+                members = [_short(by_id[m].title) for m in g.member_workspace_ids if m in by_id]
+                group_bits.append(f'"{_short(g.name)}" [' + ", ".join(members) + "]")
+            parts.append(f"Groups ({len(self.groups)}): " + " | ".join(group_bits))
         return "\n".join(parts)
 
 
@@ -446,6 +477,42 @@ _DIRECTION_WORDS = {
     "below": "down",
     "bottom": "down",
 }
+
+
+_POSITION_ALIASES = {
+    "upper": "top", "lower": "bottom", "top": "top", "bottom": "bottom",
+    "left": "left", "right": "right", "middle": "middle", "center": "middle", "centre": "middle",
+}
+
+
+def _position_word(text: str) -> Optional[str]:
+    """"top left", "the upper-right one", "bottom" -> the pane position word
+    used by _assign_positions ("top-left", "top-right", "bottom")."""
+    filler = {"the", "a", "in", "on", "at", "pane", "terminal", "one", "split", "tab", "side", "corner", "hand"}
+    words = [w for w in _SEPARATORS.split(text.strip().lower()) if w and w not in filler]
+    if not words or len(words) > 2 or any(w not in _POSITION_ALIASES for w in words):
+        return None
+    mapped = [_POSITION_ALIASES[w] for w in words]
+    rows = [w for w in mapped if w in {"top", "bottom", "middle"}]
+    cols = [w for w in mapped if w in {"left", "right", "middle"}]
+    if len(words) == 2:
+        if len(rows) == 1 and len(cols) == 1 and rows[0] != cols[0]:
+            return f"{rows[0]}-{cols[0]}"
+        if mapped[0] == "middle" and mapped[1] in {"left", "right"}:
+            return f"middle-{mapped[1]}"
+        if mapped[0] in {"top", "bottom"} and mapped[1] == "middle":
+            return f"{mapped[0]}-middle"
+        return None
+    return mapped[0]
+
+
+def is_positional(text: Optional[str]) -> bool:
+    """Whether a spoken target names a place ("top left", "the one on the
+    right", "to the left") rather than a tab or workspace name."""
+    if not text or not str(text).strip():
+        return False
+    low = str(text).strip().lower()
+    return bool(_position_word(low) or _direction_word(low))
 
 
 def _direction_word(text: str) -> Optional[str]:

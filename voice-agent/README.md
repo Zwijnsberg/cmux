@@ -21,7 +21,7 @@ Pipecat dev runner's web client. User docs: `docs/voice-agent.md`.
 | `cmux_voice/tools.py` | The v1 tool catalog and handlers (`VoiceTools`) |
 | `cmux_voice/policy.py` | Confirmation gate for close/run tools |
 | `cmux_voice/prompt.py` | System prompt and the two greetings (first session / resumed session) |
-| `cmux_voice/summary.py`, `cmux_voice/completion_flow.py` | "Terminal X is done" callouts and on-request summaries |
+| `cmux_voice/summary.py`, `cmux_voice/completion_flow.py` | "Terminal X has completed its work" callouts and on-request summaries |
 | `cmux_voice/ultravox_service.py` | Ultravox tweaks: immediate tool results, urgent (interrupting) text, tool timeout |
 | `tests/` | Fake-socket tests for the tool layer |
 
@@ -51,8 +51,10 @@ Things to say: "what do I have open", "go to workspace two", "split right",
 "open github dot com in a browser", "go back", "type ls", "run ls", "yes",
 "read the screen", "close this tab", "no", "goodbye". Actions come back with a
 single "Done."; "open Claude Code and tell it to …" sends the prompt without
-an "enter"; when an agent finishes anywhere you hear "Terminal X is done.
-Would you like a summary?" and "yes" plays the summary.
+an "enter"; when an agent finishes anywhere you hear "Terminal X has completed
+its work." and "summarize terminal X" plays the summary. "Make four terminals"
+builds a grid; "prompt Claude in the top-left terminal" targets one of them.
+Worktrees (git folders) and workspaces (sidebar rows) have separate tools.
 
 Text mode (no microphone, still calls Ultravox):
 
