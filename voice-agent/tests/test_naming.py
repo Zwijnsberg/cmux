@@ -24,9 +24,9 @@ async def test_first_prompt_names_the_terminal_only_once(tools: VoiceTools, fake
     res = await tools.compose_and_type("add tests for login", topic="login tests")
     assert res["ok"] and res["named"] == "Login Tests"
     assert _renames(fake) == [{"surface_id": "S-B1", "title": "Login Tests"}]
-    res = await tools.compose_and_type("also cover logout", topic="logout flow")
+    res = await tools.compose_and_type("also cover logout", topic="login tests")
     assert res["ok"] and "named" not in res
-    assert len(_renames(fake)) == 1, "later prompts keep the name"
+    assert len(_renames(fake)) == 1, "later prompts on the same topic keep the name"
 
 
 async def test_rename_happens_after_the_prompt_is_sent(tools: VoiceTools, fake: FakeCmux):
@@ -39,9 +39,9 @@ async def test_missing_topic_asks_the_model_to_name_it(tools: VoiceTools, fake: 
     res = await tools.compose_and_type("add tests for login")
     assert res["ok"] and res["name_this_terminal"] is True and "rename_tab" in res["reply"]
     assert _renames(fake) == []
-    # The model then names it itself; a later prompt must not ask again.
+    # The model then names it itself; a later prompt on the same topic must not ask again.
     await tools.rename_tab("Login Tests")
-    res = await tools.compose_and_type("and logout", topic="logout flow")
+    res = await tools.compose_and_type("and logout", topic="login tests")
     assert "name_this_terminal" not in res and "named" not in res
 
 
@@ -77,3 +77,40 @@ def test_prompt_forbids_naming_up_front():
     prompt = build_system_prompt()
     assert "never name a new terminal or workspace yourself" in prompt
     assert "exactly two words" in prompt
+
+
+async def test_new_topic_renames_the_terminal(tools: VoiceTools, fake: FakeCmux):
+    await tools.compose_and_type("add tests for login", topic="login tests")
+    res = await tools.compose_and_type("now write the deploy script", topic="deploy script")
+    assert res["ok"] and res["named"] == "Deploy Script" and res["renamed"] is True
+    assert _renames(fake) == [
+        {"surface_id": "S-B1", "title": "Login Tests"},
+        {"surface_id": "S-B1", "title": "Deploy Script"},
+    ]
+
+
+async def test_same_topic_in_other_words_keeps_the_name(tools: VoiceTools, fake: FakeCmux):
+    await tools.compose_and_type("add tests for login", topic="login tests")
+    res = await tools.compose_and_type("also cover the error case", topic="LOGIN TESTS.")
+    assert "named" not in res and len(_renames(fake)) == 1
+
+
+async def test_user_chosen_name_is_never_overwritten_by_topics(tools: VoiceTools, fake: FakeCmux):
+    await tools.rename_tab("server")  # "call this tab server"
+    res = await tools.compose_and_type("restart the dev server", topic="dev server")
+    assert res["ok"] and "named" not in res and "name_this_terminal" not in res
+    assert _renames(fake) == [{"surface_id": "S-B1", "title": "server"}]
+
+
+async def test_model_name_after_missing_topic_can_still_change_with_the_topic(tools: VoiceTools, fake: FakeCmux):
+    res = await tools.compose_and_type("add tests for login")
+    assert res["name_this_terminal"] is True
+    await tools.rename_tab("Login Tests")  # the model's own two-word name
+    res = await tools.compose_and_type("write the deploy script", topic="deploy script")
+    assert res["named"] == "Deploy Script" and res["renamed"] is True
+
+
+async def test_missing_topic_on_a_later_prompt_keeps_the_name(tools: VoiceTools, fake: FakeCmux):
+    await tools.compose_and_type("add tests for login", topic="login tests")
+    res = await tools.compose_and_type("and logout")
+    assert "name_this_terminal" not in res and len(_renames(fake)) == 1

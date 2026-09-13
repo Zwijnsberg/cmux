@@ -117,9 +117,13 @@ class VoiceTools:
         # Semantic mode: which terminal (if any) gets rewritten prompts.
         self.semantic = SemanticSession()
         self._on_semantic = on_semantic
-        # Terminals that already received a prompt for a coding agent; the
-        # first prompt names the terminal after its topic (see _name_after_first_prompt).
-        self._prompted_surfaces: set[str] = set()
+        # Terminal names set from prompt topics (surface id -> title). The first
+        # prompt names the terminal; a later prompt on a different topic renames
+        # it (see _name_for_topic). A name the user chose is pinned and never
+        # overwritten.
+        self._topic_titles: Dict[str, str] = {}
+        self._pinned_titles: set[str] = set()
+        self._awaiting_name: set[str] = set()
         # While on, everything the user says is typed into the terminal verbatim.
         self.dictation_active = False
         self._last_typed_surface: Optional[str] = None
@@ -769,25 +773,34 @@ class VoiceTools:
         await self.client.acall("surface.send_key", {"surface_id": surface_id, "key": "enter"})
         self._last_typed_surface = None
 
-    async def _name_after_first_prompt(self, surface_id: str, topic: Optional[str]) -> Dict[str, Any]:
-        """New terminals stay unnamed until the first prompt to a coding agent
-        goes in; then the terminal takes a two-word topic as its name. Returns
-        extra result fields: `named` with the title, or `name_this_terminal`
-        when the model forgot the topic and has to call rename_tab itself."""
-        if surface_id in self._prompted_surfaces:
+    async def _name_for_topic(self, surface_id: str, topic: Optional[str]) -> Dict[str, Any]:
+        """Name the terminal after the prompt's two-word topic: on the first
+        prompt, and again whenever a later prompt is about a different topic.
+        A name the user chose themselves is pinned and never overwritten.
+        Returns extra result fields: `named` with the new title, or
+        `name_this_terminal` when the model forgot the topic on the first
+        prompt and has to call rename_tab itself."""
+        if surface_id in self._pinned_titles:
             return {}
-        self._prompted_surfaces.add(surface_id)
         title = topic_title(topic)
+        current = self._topic_titles.get(surface_id)
         if not title:
+            if current is not None:
+                return {}  # keep the name we have rather than asking again
+            self._awaiting_name.add(surface_id)
             return {
                 "name_this_terminal": True,
                 "reply": "Now call rename_tab with a two-word summary of the topic of that prompt (Title Case, e.g. Login Tests), then say nothing.",
             }
+        if current is not None and current.lower() == title.lower():
+            return {}
         try:
             await self.client.acall("surface.rename", {"surface_id": surface_id, "title": title})
         except CmuxError:
             return {}
-        return {"named": title}
+        self._topic_titles[surface_id] = title
+        self._awaiting_name.discard(surface_id)
+        return {"named": title, "renamed": current is not None}
 
     async def compose_and_type(self, text: str, target: Optional[str] = None, topic: Optional[str] = None) -> Dict[str, Any]:
         """Type a message the model has already composed into the focused input
@@ -804,7 +817,7 @@ class VoiceTools:
             await self._submit(s.id, body)
         except CmuxError as e:
             return self._fail(f"I couldn't send that: {e}")
-        named = await self._name_after_first_prompt(s.id, topic)
+        named = await self._name_for_topic(s.id, topic)
         return await self._done("Done.", flash_surface=s.id, typed=body, sent=True, **named)
 
     async def press_enter(self, target: Optional[str] = None) -> Dict[str, Any]:
@@ -921,7 +934,7 @@ class VoiceTools:
                     await self._submit(s.id, prompt.strip())
                 except CmuxError as e:
                     return self._fail(f"{label} is open, but I couldn't send the prompt: {e}")
-                named = await self._name_after_first_prompt(s.id, topic)
+                named = await self._name_for_topic(s.id, topic)
                 return await self._done("Done.", flash_surface=s.id, agent=binary, typed=prompt.strip(), sent=True, already_open=True, **named)
             return {"ok": True, "say": f"{label} is already open in this terminal.", "agent": binary, "already_open": True}
         try:
@@ -940,7 +953,7 @@ class VoiceTools:
                 await self._submit(s.id, prompt.strip())
             except CmuxError as e:
                 return self._fail(f"Opened {label}, but couldn't send the prompt: {e}")
-            named = await self._name_after_first_prompt(s.id, topic)
+            named = await self._name_for_topic(s.id, topic)
             return await self._done("Done.", flash_surface=s.id, agent=binary, typed=prompt.strip(), sent=True, **named)
         return await self._done("Done.", flash_surface=s.id, agent=binary)
 
@@ -1015,6 +1028,15 @@ class VoiceTools:
             await self.client.acall("surface.rename", {"surface_id": s.id, "title": title.strip()})
         except CmuxError as e:
             return self._fail(f"I couldn't rename the tab: {e}")
+        if s.id in self._awaiting_name:
+            # The model naming the terminal after its first prompt: a topic
+            # name, which later topic changes may replace.
+            self._awaiting_name.discard(s.id)
+            self._topic_titles[s.id] = title.strip()
+        else:
+            # The user chose this name; topic changes never overwrite it.
+            self._pinned_titles.add(s.id)
+            self._topic_titles.pop(s.id, None)
         return await self._done(f"Named the tab {title.strip()}.", flash_surface=s.id)
 
     # ------------------------------------------------------------ tools: git
@@ -1248,7 +1270,7 @@ class VoiceTools:
             ToolSpec("shell_context", "Report the terminal's working directory and git branch. Call before composing a shell or git command when the answer depends on where the user is.", {"target": target_prop}, self.shell_context),
             ToolSpec("go_to_directory", "Change the terminal's directory to a folder the user names. Finds it by name (relative to the current directory, then by search) and runs cd. Ask only if several folders share the name.", {"name": {"type": "string", "description": "Folder name or path as spoken, e.g. 'staff portal', 'voice agent', 'src/lib'."}, "parent": {"type": "string", "description": "Optional parent folder name to disambiguate."}, "target": target_prop}, self.go_to_directory, required=["name"]),
             ToolSpec("run_shell", "Run a shell or git command that YOU composed from the user's intent, e.g. 'switch to develop' -> git checkout develop. Compose exact, correct syntax; call shell_context first if it depends on the current branch or directory. Requires confirmation unless trusted input is on.", {"command": {"type": "string", "description": "The exact command line."}, "target": target_prop}, self.run_shell, required=["command"]),
-            ToolSpec("compose_and_type", "Send a message to the focused input, such as a Claude Code or Codex prompt: it is typed AND submitted with enter in one step. Use for 'tell it ...', 'ask it ...', 'have it ...', 'write down ...'. Never ask the user to say enter. Always pass topic: the first prompt into a terminal names that terminal after it.", {"text": {"type": "string", "description": "The text to send (verbatim, or rewritten when semantic mode is on)."}, "topic": {"type": "string", "description": "Exactly two words summarizing what the prompt is about, Title Case, e.g. 'Login Tests'. Always pass it."}, "target": target_prop}, self.compose_and_type, required=["text", "topic"]),
+            ToolSpec("compose_and_type", "Send a message to the focused input, such as a Claude Code or Codex prompt: it is typed AND submitted with enter in one step. Use for 'tell it ...', 'ask it ...', 'have it ...', 'write down ...'. Never ask the user to say enter. Always pass topic: the first prompt into a terminal names that terminal after it.", {"text": {"type": "string", "description": "The text to send (verbatim, or rewritten when semantic mode is on)."}, "topic": {"type": "string", "description": "Exactly two words summarizing what the prompt is about, Title Case, e.g. 'Login Tests'. Always pass it; keep the same topic while the subject stays the same, pass a new one when the user moves to a different subject (the terminal is renamed)."}, "target": target_prop}, self.compose_and_type, required=["text", "topic"]),
             ToolSpec("press_enter", "Press enter to submit whatever is in the focused input, terminal or agent CLI. Use when the user says enter, send, submit, or go.", {"target": target_prop}, self.press_enter),
             ToolSpec("open_agent", "Open a coding agent CLI (Claude Code by default; also Codex, OpenCode, Gemini, Pi) in the terminal. Optionally pass a first prompt from the user's request; it is typed and sent in the same call and names the terminal after topic. Never asks for confirmation.", {"agent": {"type": "string", "description": "claude (default), codex, opencode, gemini, or pi."}, "prompt": {"type": "string", "description": "Optional first prompt (verbatim, or rewritten when semantic mode is on)."}, "topic": {"type": "string", "description": "With a prompt: exactly two words summarizing its topic, Title Case, e.g. 'Login Tests'."}, "target": target_prop}, self.open_agent),
             ToolSpec("create_workspace_group", "Create a named workspace group in the sidebar, optionally containing existing workspaces.", {"name": {"type": "string"}, "workspaces": {"type": "array", "items": {"type": "string"}, "description": "Existing workspace names to put in the group."}}, self.create_workspace_group, required=["name"]),

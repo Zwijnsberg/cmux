@@ -122,6 +122,14 @@ audio page; the sidecar keeps a `SemanticSession`
 (`voice-agent/cmux_voice/semantic.py`) and tells the model how to compose
 through a system notice.
 
+## Terminal names follow the prompts
+
+New terminals are not named up front. The first prompt the voice agent sends
+to Claude Code or Codex in a terminal names that terminal with a two-word
+topic ("Login Tests", "Deploy Script"), and when a later prompt moves to a
+different subject the terminal is renamed to the new topic. A name you gave
+yourself ("call this tab server") is never overwritten.
+
 ## Setup
 
 1. **Python sidecar** (once per checkout; a bundled runtime is planned):
